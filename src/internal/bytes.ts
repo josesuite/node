@@ -33,3 +33,18 @@ export function toBufferSource(input: Uint8Array): Uint8Array<ArrayBuffer> {
   copy.set(input);
   return copy;
 }
+
+export function concatBytes(...parts: readonly Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const part of parts) {
+    total += part.length;
+  }
+
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
+}
