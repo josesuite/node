@@ -15,8 +15,8 @@
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
 import { attempt, importJwk } from '../../internal/crypto/webcrypto.ts';
-import type { RsaPublicMaterial } from '../../key/validation.ts';
-import { rsaPublicJwk } from '../jws/rsa-common.ts';
+import type { RsaPrivateMaterial, RsaPublicMaterial } from '../../key/validation.ts';
+import { rsaJwk, rsaPublicJwk } from '../jws/rsa-common.ts';
 
 const OAEP_HASHES: Readonly<Record<string, string>> = Object.freeze({
   'RSA-OAEP-256': 'SHA-256',
@@ -45,4 +45,40 @@ export async function encryptRsaOaep(
   });
 
   return result.ok ? backendOk(new Uint8Array(result.value)) : result;
+}
+
+/**
+ * Recovers the CEK, returning `undefined` when the ciphertext does not decrypt
+ * under this key.
+ *
+ * OAEP decoding failures are reported the same way as a wrong key, and the
+ * caller must not distinguish them in anything it emits: separating them
+ * historically enabled adaptive attacks that recover the plaintext from a
+ * server's differing responses.
+ */
+export async function decryptRsaOaep(
+  algorithm: string,
+  key: RsaPrivateMaterial,
+  encryptedKey: Uint8Array,
+): Promise<BackendResult<Uint8Array | undefined>> {
+  const hash = oaepHash(algorithm);
+  if (hash === undefined) {
+    return backendError('unsupported');
+  }
+  // The ciphertext is exactly one modulus wide; anything else cannot have come
+  // from this key and is rejected before the private operation.
+  if (encryptedKey.length !== key.n.length) {
+    return backendOk(undefined);
+  }
+
+  const imported = await attempt(() => importJwk(rsaJwk(key), { name: 'RSA-OAEP', hash }, ['decrypt']));
+  if (!imported.ok) {
+    return imported;
+  }
+  try {
+    const decrypted = await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, imported.value, toBufferSource(encryptedKey));
+    return backendOk(new Uint8Array(decrypted));
+  } catch {
+    return backendOk(undefined);
+  }
 }
