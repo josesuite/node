@@ -14,11 +14,11 @@
  * default would refuse signatures other conforming implementations produce.
  */
 
-import { createPrivateKey, sign as nodeSign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, sign as nodeSign, verify as nodeVerify } from 'node:crypto';
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { attempt, base64url, importJwk } from '../../internal/crypto/webcrypto.ts';
+import { attempt, attemptVerify, base64url, importJwk } from '../../internal/crypto/webcrypto.ts';
 
 interface EcdsaParameters {
   readonly hash: string;
@@ -97,6 +97,50 @@ export async function signEcdsa(
   return backendOk(bytes);
 }
 
+export async function verifyEcdsa(
+  algorithm: string,
+  publicJwk: { crv: string; x: Uint8Array; y: Uint8Array },
+  signingInput: Uint8Array,
+  signature: Uint8Array,
+): Promise<BackendResult<boolean>> {
+  const parameters = ECDSA_ALGORITHMS[algorithm];
+  if (parameters === undefined) {
+    return backendError('unsupported');
+  }
+  if (publicJwk.crv !== parameters.curve) {
+    return backendError('operation_failed');
+  }
+
+  // Length is public, so checking it before any cryptographic work leaks
+  // nothing and rejects malformed input cheaply.
+  if (signature.length !== parameters.componentBytes * 2) {
+    return backendOk(false);
+  }
+
+  // A zero R or S is outside the valid scalar range. Some providers accept
+  // such a signature, so the range is checked here rather than assumed.
+  const half = parameters.componentBytes;
+  if (isAllZero(signature.subarray(0, half)) || isAllZero(signature.subarray(half))) {
+    return backendOk(false);
+  }
+
+  const jwk = { kty: 'EC', crv: publicJwk.crv, x: base64url(publicJwk.x), y: base64url(publicJwk.y) };
+
+  if (parameters.nativeOnly) {
+    return verifyNative(parameters, jwk, signingInput, signature);
+  }
+
+  return attemptVerify(async () => {
+    const key = await importJwk(jwk, { name: 'ECDSA', namedCurve: parameters.curve }, ['verify']);
+    return crypto.subtle.verify(
+      { name: 'ECDSA', hash: parameters.hash },
+      key,
+      toBufferSource(signature),
+      toBufferSource(signingInput),
+    );
+  });
+}
+
 /**
  * Signs with the native module for the one curve WebCrypto does not carry.
  *
@@ -119,4 +163,34 @@ function signNative(
   } catch {
     return backendError('operation_failed');
   }
+}
+
+function verifyNative(
+  parameters: EcdsaParameters,
+  jwk: Record<string, string>,
+  signingInput: Uint8Array,
+  signature: Uint8Array,
+): BackendResult<boolean> {
+  const hash = NATIVE_HASHES[parameters.hash];
+  if (hash === undefined) {
+    return backendError('unsupported');
+  }
+
+  try {
+    const key = createPublicKey({ key: jwk, format: 'jwk' });
+    return backendOk(nodeVerify(hash, signingInput, { key, dsaEncoding: 'ieee-p1363' }, signature));
+  } catch {
+    // A provider rejection here is a failed verification, never an error that
+    // could be mistaken for success.
+    return backendOk(false);
+  }
+}
+
+function isAllZero(bytes: Uint8Array): boolean {
+  for (const byte of bytes) {
+    if (byte !== 0) {
+      return false;
+    }
+  }
+  return true;
 }
