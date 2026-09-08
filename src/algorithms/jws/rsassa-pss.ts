@@ -54,15 +54,24 @@ export async function verifyRsaPss(
     return backendError('unsupported');
   }
 
-  return attemptVerify(async () => {
-    const key = await importJwk(rsaPublicJwk(publicJwk), { name: 'RSA-PSS', hash: parameters.hash }, ['verify']);
-    // Fixing the length here is what rejects an otherwise valid signature that
-    // used a salt this policy does not permit.
-    return crypto.subtle.verify(
+  // Importing the key is an operational step, not a cryptographic outcome: a
+  // rejection here means the key or the provider is unusable, which must not be
+  // reported as a signature that did not verify.
+  const key = await attempt(() =>
+    importJwk(rsaPublicJwk(publicJwk), { name: 'RSA-PSS', hash: parameters.hash }, ['verify']),
+  );
+  if (!key.ok) {
+    return key;
+  }
+
+  // Fixing the length here is what rejects an otherwise valid signature that
+  // used a salt this policy does not permit.
+  return attemptVerify(() =>
+    crypto.subtle.verify(
       { name: 'RSA-PSS', saltLength: parameters.saltBytes },
-      key,
+      key.value,
       toBufferSource(signature),
       toBufferSource(signingInput),
-    );
-  });
+    ),
+  );
 }
