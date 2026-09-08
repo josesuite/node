@@ -202,3 +202,25 @@ export function lookupAlgorithm(identifier: string, use: AlgorithmUse): Algorith
 export function isProhibitedAlgorithm(identifier: string, use: AlgorithmUse): boolean {
   return lookupAlgorithm(identifier, use)?.category === 'prohibited';
 }
+
+export function defaultEligibleAlgorithms(use: AlgorithmUse): readonly string[] {
+  const eligible: string[] = [];
+  for (const [identifier, byUse] of REGISTRY) {
+    if (byUse.get(use)?.defaultEligible === true) {
+      eligible.push(identifier);
+    }
+  }
+  return eligible;
+}
+
+/** Returns descriptors available to capability reporting. */
+export function implementedAlgorithms(use: AlgorithmUse): readonly AlgorithmDescriptor[] {
+  const implemented: AlgorithmDescriptor[] = [];
+  for (const byUse of REGISTRY.values()) {
+    const entry = byUse.get(use);
+    if (entry !== undefined && entry.category !== 'prohibited' && entry.category !== 'unspecified') {
+      implemented.push(entry);
+    }
+  }
+  return implemented.toSorted((left, right) => left.identifier.localeCompare(right.identifier));
+}
