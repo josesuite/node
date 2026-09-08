@@ -41,3 +41,44 @@ export interface KeyManagementShape {
    */
   readonly singleRecipientOnly: boolean;
 }
+
+const SHAPES: Readonly<Record<string, KeyManagementShape>> = Object.freeze({
+  dir: { mode: 'direct', carriesEncryptedKey: false, singleRecipientOnly: true },
+  'ECDH-ES': { mode: 'direct_agreement', carriesEncryptedKey: false, singleRecipientOnly: true },
+
+  A128KW: { mode: 'key_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+  A192KW: { mode: 'key_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+  A256KW: { mode: 'key_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+
+  'RSA-OAEP-256': { mode: 'key_transport', carriesEncryptedKey: true, singleRecipientOnly: false },
+  'RSA-OAEP': { mode: 'key_transport', carriesEncryptedKey: true, singleRecipientOnly: false },
+
+  'ECDH-ES+A128KW': { mode: 'agreement_with_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+  'ECDH-ES+A192KW': { mode: 'agreement_with_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+  'ECDH-ES+A256KW': { mode: 'agreement_with_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+
+  A128GCMKW: { mode: 'gcm_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+  A192GCMKW: { mode: 'gcm_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+  A256GCMKW: { mode: 'gcm_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+
+  'PBES2-HS256+A128KW': { mode: 'password_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+  'PBES2-HS384+A192KW': { mode: 'password_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+  'PBES2-HS512+A256KW': { mode: 'password_wrapping', carriesEncryptedKey: true, singleRecipientOnly: false },
+});
+
+/** How an identifier manages keys, or `undefined` when it names nothing here. */
+export function keyManagementShape(algorithm: string): KeyManagementShape | undefined {
+  return SHAPES[algorithm];
+}
+
+/**
+ * The AES-KW identifier an agreement-with-wrapping algorithm wraps under.
+ *
+ * The derived key feeds this wrapping step, and its size comes from this
+ * identifier rather than from the content algorithm, which is what makes the
+ * KDF input for wrapped agreement differ from direct agreement.
+ */
+export function agreementWrappingAlgorithm(algorithm: string): string | undefined {
+  const suffix = algorithm.startsWith('ECDH-ES+') ? algorithm.slice('ECDH-ES+'.length) : undefined;
+  return suffix !== undefined && SHAPES[suffix]?.mode === 'key_wrapping' ? suffix : undefined;
+}
