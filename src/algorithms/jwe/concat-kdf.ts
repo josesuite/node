@@ -81,3 +81,13 @@ export function concatKdf(sharedSecret: Uint8Array, input: ConcatKdfInput): Uint
   derived.fill(0);
   return key;
 }
+
+/**
+ * Builds the party field for a header member that may be absent.
+ *
+ * An absent field and a present field with empty content both contribute only a
+ * zero-length prefix, so this helper deliberately treats them the same.
+ */
+export function partyInfo(decoded: Uint8Array | undefined): Uint8Array {
+  return decoded ?? new Uint8Array(0);
+}
