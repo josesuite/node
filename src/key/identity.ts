@@ -9,6 +9,8 @@
  * one an implementation happened to pick.
  */
 
+import { createHash, timingSafeEqual } from 'node:crypto';
+
 import { constantTime } from '../internal/crypto/constant-time.ts';
 
 /**
@@ -113,4 +115,67 @@ export function representationImpliesHolderIdentity(identity: KeyIdentity): bool
     return true;
   }
   return identity.crv !== 'X25519' && identity.crv !== 'X448';
+}
+
+/** Hash and block size for each HMAC algorithm, used for key preprocessing. */
+const HMAC_PARAMETERS: Readonly<Record<string, { hash: string; blockBytes: number }>> = Object.freeze({
+  HS256: { hash: 'sha256', blockBytes: 64 },
+  HS384: { hash: 'sha384', blockBytes: 128 },
+  HS512: { hash: 'sha512', blockBytes: 128 },
+});
+
+/**
+ * Computes the effective HMAC key block for a secret.
+ *
+ * A key longer than the block size is hashed, and any key shorter than the
+ * block size is zero-padded to it. That preprocessing means distinct secret
+ * octets can still yield one authentication capability: a short key and its
+ * zero-extended alias are equivalent, as are a long key and its hash.
+ *
+ * The returned block is secret material. It must never be exposed as an
+ * identifier, thumbprint, log value, or diagnostic, because it is derived
+ * directly from the key.
+ */
+function effectiveHmacBlock(secret: Uint8Array, algorithm: string): Uint8Array | undefined {
+  const parameters = HMAC_PARAMETERS[algorithm];
+  if (parameters === undefined) {
+    return undefined;
+  }
+
+  const reduced =
+    secret.length > parameters.blockBytes
+      ? new Uint8Array(createHash(parameters.hash).update(secret).digest())
+      : undefined;
+
+  const block = new Uint8Array(parameters.blockBytes);
+  block.set(reduced ?? secret);
+  reduced?.fill(0);
+  return block;
+}
+
+/**
+ * Whether two HMAC keys bound to the same algorithm have one authentication
+ * capability, and therefore cannot be assigned to different principals.
+ *
+ * Different secret octets are not sufficient evidence of different capability,
+ * which is why this compares the preprocessed blocks rather than the keys.
+ * Both keys must already have passed their own validation; this check must
+ * never make an otherwise invalid key acceptable.
+ */
+export function sameHmacDomain(a: Uint8Array, b: Uint8Array, algorithm: string): boolean {
+  const blockA = effectiveHmacBlock(a, algorithm);
+  const blockB = effectiveHmacBlock(b, algorithm);
+  if (blockA === undefined || blockB === undefined) {
+    return false;
+  }
+
+  try {
+    // Both blocks are the same fixed size for a given algorithm, so a
+    // constant-time comparison is always applicable here.
+    return timingSafeEqual(blockA, blockB);
+  } finally {
+    // The blocks are secret-derived and are not needed after the comparison.
+    blockA.fill(0);
+    blockB.fill(0);
+  }
 }
