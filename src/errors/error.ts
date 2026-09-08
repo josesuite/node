@@ -1,4 +1,5 @@
 import type { ErrorCategory, TrustStage } from './codes.ts';
+import { inspect } from 'node:util';
 
 /**
  * Sanitized, non-secret detail about a failure.
@@ -39,4 +40,51 @@ export interface JoseErrorOptions extends JoseErrorDetail {
 export interface JoseDiagnostic extends JoseErrorDetail {
   readonly category: ErrorCategory;
   readonly stage: TrustStage;
+}
+
+export class JoseError extends Error {
+  readonly category: ErrorCategory;
+  readonly stage: TrustStage;
+  readonly reason: string;
+  readonly location: string | undefined;
+
+  constructor(options: JoseErrorOptions) {
+    // The message deliberately contains only the category and non-secret
+    // reason slug so that accidental logging cannot leak token material.
+    super(`${options.category}: ${options.reason}`, { cause: options.cause });
+    this.name = 'JoseError';
+    this.category = options.category;
+    this.stage = options.stage;
+    this.reason = options.reason;
+    this.location = options.location;
+  }
+
+  /** Explicit opt-in sanitized projection; excludes `cause` and the stack. */
+  toDiagnostic(): JoseDiagnostic {
+    return this.location === undefined
+      ? { category: this.category, stage: this.stage, reason: this.reason }
+      : {
+          category: this.category,
+          stage: this.stage,
+          reason: this.reason,
+          location: this.location,
+        };
+  }
+
+  /**
+   * Prevents `JSON.stringify` and similar inspection from emitting the retained
+   * provider cause or the stack. Diagnostics must be opt-in, so the default
+   * serialization of an error cannot leak more than the sanitized projection.
+   */
+  toJSON(): JoseDiagnostic {
+    return this.toDiagnostic();
+  }
+
+  [inspect.custom](): string {
+    return `JoseError ${inspect(this.toDiagnostic())}`;
+  }
+}
+
+export function isJoseError(value: unknown): value is JoseError {
+  return value instanceof JoseError;
 }
