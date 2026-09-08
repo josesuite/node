@@ -51,23 +51,26 @@ export async function decryptKeyContainer(
     return decrypted;
   }
 
-  // The container's content type must be stated and protected, so a single key
-  // and a key set cannot be substituted for one another. It may be omitted only
-  // when the caller has already bound the type through the transport.
-  const cty = decrypted.header.parameters.get('cty');
-  if (cty === undefined) {
-    if (options.contentTypeExternallyBound !== true) {
-      return fail('header', 'token_type_mismatch', 'key_container_cty_required');
-    }
-  } else if (
-    !isProtected(decrypted.header, 'cty') ||
-    cty.value.kind !== 'string' ||
-    normalizeMediaType(cty.value.value) !== normalizeMediaType(options.type)
-  ) {
-    return fail('header', 'token_type_mismatch', 'key_container_cty_mismatch');
-  }
-
+  // Every exit after decryption is inside the cleanup, including the content-type
+  // rejections: the plaintext is an owned decrypted private-key document, so a
+  // rejected container must not leave it in memory.
   try {
+    // The container's content type must be stated and protected, so a single key
+    // and a key set cannot be substituted for one another. It may be omitted only
+    // when the caller has already bound the type through the transport.
+    const cty = decrypted.header.parameters.get('cty');
+    if (cty === undefined) {
+      if (options.contentTypeExternallyBound !== true) {
+        return fail('header', 'token_type_mismatch', 'key_container_cty_required');
+      }
+    } else if (
+      !isProtected(decrypted.header, 'cty') ||
+      cty.value.kind !== 'string' ||
+      normalizeMediaType(cty.value.value) !== normalizeMediaType(options.type)
+    ) {
+      return fail('header', 'token_type_mismatch', 'key_container_cty_mismatch');
+    }
+
     const parsed = parseJson(decrypted.plaintext, options.limits);
     if (!parsed.ok) {
       return fail(
