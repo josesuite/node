@@ -13,7 +13,7 @@ import type { ErrorCategory } from '../errors/codes.ts';
 import { decodeBase64url } from '../internal/encoding/base64url.ts';
 import type { JsonObject } from '../internal/json/types.ts';
 import { LIMITS_V1 } from '../policy/limits.ts';
-import type { EcCurve } from './types.ts';
+import type { EcCurve, OkpCurve } from './types.ts';
 
 export interface MaterialRejection {
   readonly ok: false;
@@ -274,6 +274,14 @@ export const EC_COORDINATE_BYTES: Readonly<Record<EcCurve, number>> = Object.fre
   secp256k1: 32,
 });
 
+/** Fixed public and private lengths per OKP curve. */
+export const OKP_KEY_BYTES: Readonly<Record<OkpCurve, { public: number; private: number }>> = Object.freeze({
+  Ed25519: { public: 32, private: 32 },
+  Ed448: { public: 57, private: 57 },
+  X25519: { public: 32, private: 32 },
+  X448: { public: 56, private: 56 },
+});
+
 /**
  * Validates that an EC coordinate or scalar has exactly the curve's width.
  *
@@ -389,4 +397,73 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
     }
   }
   return true;
+}
+
+export interface OkpMaterial {
+  readonly curve: OkpCurve;
+  readonly x: Uint8Array;
+  readonly d: Uint8Array | undefined;
+}
+
+/**
+ * Validates OKP key material.
+ *
+ * For the signing curves the public value additionally passes the canonical
+ * encoding, identity, and subgroup checks, because the provider admits
+ * low-order and non-canonical points that cannot serve as a signer identity.
+ *
+ * For a private key the public component is derived from `d` and compared for
+ * exact octet equality. Agreement curves permit certain equivalent public
+ * encodings when processing a peer's value, but a configured private key must
+ * carry its canonical projection, so that one private key has one identity.
+ */
+export function validateOkpMaterial(
+  jwk: JsonObject,
+  curve: OkpCurve,
+  derivePublicKey: (curve: string, privateKey: Uint8Array) => { ok: true; value: Uint8Array } | { ok: false },
+  validateSigningPublicKey: (encoded: Uint8Array) => string | undefined,
+): { readonly ok: true; readonly material: OkpMaterial } | MaterialRejection {
+  const sizes = OKP_KEY_BYTES[curve];
+  // As for EC, decoding allows more than the exact size so a wrong-length value
+  // is a malformed key rather than a resource limit, while staying bounded by
+  // the largest supported OKP key.
+  const decodeAllowance = OKP_KEY_BYTES.Ed448.public;
+
+  const xResult = decodeMember(jwk, 'x', decodeAllowance);
+  if (!xResult.ok) {
+    return xResult;
+  }
+  if (xResult.bytes.length !== sizes.public) {
+    return reject('x_wrong_length');
+  }
+
+  if (curve === 'Ed25519') {
+    const failure = validateSigningPublicKey(xResult.bytes);
+    if (failure !== undefined) {
+      return reject(`ed25519_${failure}`);
+    }
+  }
+
+  if (!jwk.members.has('d')) {
+    return { ok: true, material: { curve, x: xResult.bytes, d: undefined } };
+  }
+
+  const dResult = decodeMember(jwk, 'd', decodeAllowance);
+  if (!dResult.ok) {
+    return dResult;
+  }
+  if (dResult.bytes.length !== sizes.private) {
+    return reject('d_wrong_length');
+  }
+
+  const derived = derivePublicKey(curve, dResult.bytes);
+  if (!derived.ok) {
+    return reject('private_key_invalid');
+  }
+
+  if (!bytesEqual(derived.value, xResult.bytes)) {
+    return reject('public_private_mismatch');
+  }
+
+  return { ok: true, material: { curve, x: xResult.bytes, d: dResult.bytes } };
 }
