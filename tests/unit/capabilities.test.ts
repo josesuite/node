@@ -41,6 +41,19 @@ describe('capability reporting', () => {
     expect(report.backend.providers).toEqual(['WebCrypto', 'node:crypto']);
   });
 
+  test('states the required capabilities this build cannot offer', () => {
+    const report = getCapabilityReport();
+
+    // Ed25519 is a required capability with no qualified backend. The gap is
+    // stated rather than left as an absence a caller would have to infer.
+    const gap = report.requiredCapabilityGaps.find((entry) => entry.identifier === 'Ed25519');
+    expect(gap).toBeDefined();
+    expect(gap!.use).toBe('jws');
+    expect(gap!.reason).toBe('no_qualified_backend');
+
+    expect(report.fullSuiteConformant).toBe(false);
+  });
+
   test('does not expose mutable capability state', () => {
     const report = getCapabilityReport();
 
@@ -48,6 +61,7 @@ describe('capability reporting', () => {
     expect(Object.isFrozen(report.algorithms)).toBe(true);
     expect(Object.isFrozen(report.algorithms.jws)).toBe(true);
     expect(Object.isFrozen(report.algorithms.jws.create)).toBe(true);
+    expect(Object.isFrozen(report.requiredCapabilityGaps)).toBe(true);
     expect(Object.isFrozen(report.limits)).toBe(true);
   });
 });
