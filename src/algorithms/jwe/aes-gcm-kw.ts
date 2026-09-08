@@ -91,3 +91,47 @@ export async function wrapGcmKw(
     tag: combined.subarray(cek.length),
   });
 }
+
+/**
+ * Unwraps a CEK, returning `undefined` when the wrapping tag does not verify.
+ *
+ * A failed tag is an authentication outcome rather than a provider fault, and
+ * it is reported identically for a wrong KEK, a modified wrapped key, and a
+ * modified wrapping tag so none can be told apart.
+ */
+export async function unwrapGcmKw(
+  algorithm: string,
+  kek: Uint8Array,
+  iv: Uint8Array,
+  encryptedKey: Uint8Array,
+  tag: Uint8Array,
+): Promise<BackendResult<Uint8Array | undefined>> {
+  const kekBytes = gcmKwKeySize(algorithm);
+  if (kekBytes === undefined) {
+    return backendError('unsupported');
+  }
+  if (kek.length !== kekBytes) {
+    return backendError('operation_failed');
+  }
+  // Both widths are public and fixed, so a wrong width is a malformed object
+  // rather than a decryption attempt worth making.
+  if (iv.length !== GCMKW_IV_BYTES || tag.length !== GCMKW_TAG_BYTES) {
+    return backendOk(undefined);
+  }
+
+  const combined = new Uint8Array(encryptedKey.length + tag.length);
+  combined.set(encryptedKey);
+  combined.set(tag, encryptedKey.length);
+
+  try {
+    const handle = await importRaw(kek, { name: 'AES-GCM', length: kekBytes * 8 }, ['decrypt']);
+    const cek = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: toBufferSource(iv), tagLength: GCMKW_TAG_BYTES * 8 },
+      handle,
+      toBufferSource(combined),
+    );
+    return backendOk(new Uint8Array(cek));
+  } catch {
+    return backendOk(undefined);
+  }
+}
