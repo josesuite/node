@@ -12,6 +12,7 @@
 import type { ErrorCategory } from '../errors/codes.ts';
 import { decodeBase64url } from '../internal/encoding/base64url.ts';
 import type { JsonObject } from '../internal/json/types.ts';
+import { LIMITS_V1 } from '../policy/limits.ts';
 
 export interface MaterialRejection {
   readonly ok: false;
@@ -74,4 +75,192 @@ export function toBigInt(bytes: Uint8Array): bigint {
     value = (value << 8n) | BigInt(byte);
   }
   return value;
+}
+
+/** Number of significant bits in a nonzero byte, e.g. 0x01 -> 1, 0x80 -> 8. */
+function bitLengthOfByte(byte: number): number {
+  return 32 - Math.clz32(byte);
+}
+
+export interface RsaPublicMaterial {
+  readonly n: Uint8Array;
+  readonly e: Uint8Array;
+  readonly modulusBits: number;
+}
+
+/**
+ * Private RSA material, carrying the complete CRT parameter group.
+ *
+ * The octets are retained exactly as decoded rather than recomputed, because
+ * the leading-zero padding is significant to the provider's key import.
+ */
+export interface RsaPrivateMaterial extends RsaPublicMaterial {
+  readonly d: Uint8Array;
+  readonly p: Uint8Array;
+  readonly q: Uint8Array;
+  readonly dp: Uint8Array;
+  readonly dq: Uint8Array;
+  readonly qi: Uint8Array;
+}
+
+/**
+ * Validates RSA public material.
+ *
+ * `receiveOnly` admits the 2048 through 3071 bit range for compatibility with
+ * accept for verification of existing tokens. The modern floor is 3072 bits;
+ * nothing below 2048 bits is ever acceptable.
+ */
+export function validateRsaPublic(
+  jwk: JsonObject,
+  options: { readonly receiveOnly: boolean },
+): { readonly ok: true; readonly material: RsaPublicMaterial } | MaterialRejection {
+  const maxModulusBytes = LIMITS_V1.rsaModulusBits / 8;
+
+  const nResult = decodeMember(jwk, 'n', maxModulusBytes);
+  if (!nResult.ok) {
+    return nResult;
+  }
+  const nInvalid = validateUInt(nResult.bytes, 'n');
+  if (nInvalid !== undefined) {
+    return nInvalid;
+  }
+
+  // The exponent is bounded to 32 bits, which keeps public-key operations
+  // cheap; an attacker-chosen huge exponent would otherwise cost real work.
+  const eResult = decodeMember(jwk, 'e', 4);
+  if (!eResult.ok) {
+    return eResult;
+  }
+  const eInvalid = validateUInt(eResult.bytes, 'e');
+  if (eInvalid !== undefined) {
+    return eInvalid;
+  }
+
+  const n = toBigInt(nResult.bytes);
+  const e = toBigInt(eResult.bytes);
+
+  // An even modulus is not a product of two odd primes, so it cannot be a valid
+  // RSA modulus regardless of its size.
+  if ((n & 1n) === 0n) {
+    return reject('n_even');
+  }
+
+  // Significant bit length: all bytes but the first contribute eight bits each,
+  // and the leading byte contributes only its significant bits. The encoding is
+  // minimal, so the leading byte is nonzero and `bitLengthOfByte` is at least 1.
+  const modulusBits = (nResult.bytes.length - 1) * 8 + bitLengthOfByte(nResult.bytes[0]!);
+  const floor = options.receiveOnly ? 2048 : 3072;
+  if (modulusBits < floor) {
+    return reject('n_too_small', 'incompatible_key');
+  }
+  if (modulusBits > LIMITS_V1.rsaModulusBits) {
+    return reject('n_too_large', 'resource_limit');
+  }
+
+  if ((e & 1n) === 0n) {
+    return reject('e_even');
+  }
+  if (e < 3n) {
+    return reject('e_too_small');
+  }
+  if (e >= n) {
+    return reject('e_not_less_than_n');
+  }
+
+  return { ok: true, material: { n: nResult.bytes, e: eResult.bytes, modulusBits } };
+}
+
+/**
+ * Validates the presence and consistency of RSA private material.
+ *
+ * The complete CRT parameter group is required, which is stricter than the
+ * bare `n,e,d` form the JWK format permits. Requiring it means the arithmetic
+ * relationships below can be checked at import; a key supplying only `d` would
+ * have to be trusted rather than verified.
+ *
+ * The Node provider accepts a JWK whose `qi` is inconsistent with `p` and `q`
+ * and then signs with it successfully, so these relationships are checked here
+ * rather than left to the backend.
+ */
+export function validateRsaPrivate(
+  jwk: JsonObject,
+  publicMaterial: RsaPublicMaterial,
+): { readonly ok: true; readonly material: RsaPrivateMaterial } | MaterialRejection {
+  // Multi-prime RSA is unsupported, and its presence changes the meaning of
+  // every other CRT parameter, so it is refused rather than ignored.
+  if (jwk.members.has('oth')) {
+    return reject('oth_unsupported');
+  }
+
+  const maxBytes = LIMITS_V1.rsaModulusBits / 8;
+  const parts: Record<string, bigint> = {};
+  const octets: Record<string, Uint8Array> = {};
+
+  for (const name of ['d', 'p', 'q', 'dp', 'dq', 'qi']) {
+    const result = decodeMember(jwk, name, maxBytes);
+    if (!result.ok) {
+      return result;
+    }
+    const invalid = validateUInt(result.bytes, name);
+    if (invalid !== undefined) {
+      return invalid;
+    }
+    parts[name] = toBigInt(result.bytes);
+    octets[name] = result.bytes;
+  }
+
+  const n = toBigInt(publicMaterial.n);
+  const e = toBigInt(publicMaterial.e);
+  const d = parts['d']!;
+  const p = parts['p']!;
+  const q = parts['q']!;
+  const dp = parts['dp']!;
+  const dq = parts['dq']!;
+  const qi = parts['qi']!;
+
+  if (p === q) {
+    return reject('p_equals_q');
+  }
+  // Neither factor can be 1: no prime is, and `p - 1` and `q - 1` are used as
+  // moduli below, where a zero divisor would throw out of a validation path
+  // that must return a normalized rejection. A forged `p = 1, q = n` satisfies
+  // the product check, so this is reached with attacker-supplied members.
+  if (p <= 1n || q <= 1n) {
+    return reject('factor_not_greater_than_one');
+  }
+  if (p * q !== n) {
+    return reject('pq_product_mismatch');
+  }
+
+  // The private exponent must invert the public one modulo each prime's group
+  // order. Checking per prime avoids needing lcm(p-1, q-1) directly.
+  if ((e * d) % (p - 1n) !== 1n % (p - 1n)) {
+    return reject('d_inconsistent_mod_p');
+  }
+  if ((e * d) % (q - 1n) !== 1n % (q - 1n)) {
+    return reject('d_inconsistent_mod_q');
+  }
+
+  if (dp !== d % (p - 1n)) {
+    return reject('dp_mismatch');
+  }
+  if (dq !== d % (q - 1n)) {
+    return reject('dq_mismatch');
+  }
+  if ((qi * q) % p !== 1n % p) {
+    return reject('qi_mismatch');
+  }
+
+  return {
+    ok: true,
+    material: {
+      ...publicMaterial,
+      d: octets['d']!,
+      p: octets['p']!,
+      q: octets['q']!,
+      dp: octets['dp']!,
+      dq: octets['dq']!,
+      qi: octets['qi']!,
+    },
+  };
 }
