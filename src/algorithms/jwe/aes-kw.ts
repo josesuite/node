@@ -78,3 +78,61 @@ export async function wrapAesKw(
     return backendError('operation_failed');
   }
 }
+
+/**
+ * Unwraps, returning `undefined` when the integrity check fails.
+ *
+ * A failed check is an authentication outcome rather than a provider fault, and
+ * it is reported identically for a wrong KEK and for modified wrapped bytes so
+ * the two cannot be told apart.
+ */
+export async function unwrapAesKw(
+  algorithm: string,
+  kek: Uint8Array,
+  wrapped: Uint8Array,
+): Promise<BackendResult<Uint8Array | undefined>> {
+  const kekBytes = aesKwKeySize(algorithm);
+  if (kekBytes === undefined) {
+    return backendError('unsupported');
+  }
+  if (kek.length !== kekBytes) {
+    return backendError('operation_failed');
+  }
+  // Length is public, so a wrapped value that cannot have come from this
+  // construction is rejected before any key operation.
+  if (wrapped.length < 24 || wrapped.length % 8 !== 0) {
+    return backendOk(undefined);
+  }
+
+  let unwrappingKey: CryptoKey;
+  try {
+    unwrappingKey = await importKek(kek, 'unwrapKey');
+  } catch {
+    return backendError('operation_failed');
+  }
+
+  try {
+    // `unwrapKey` verifies the integrity octets and rejects when they do not
+    // match, which is the expected path for a wrong key. The recovered key is
+    // imported as extractable so its octets can be returned; it is raw key
+    // material to this layer, not a usable algorithm key.
+    const recovered = await crypto.subtle.unwrapKey(
+      'raw',
+      toBufferSource(wrapped),
+      unwrappingKey,
+      'AES-KW',
+      { name: 'HMAC', hash: 'SHA-256' },
+      true,
+      ['sign'],
+    );
+
+    return backendOk(new Uint8Array(await crypto.subtle.exportKey('raw', recovered)));
+  } catch {
+    return backendOk(undefined);
+  }
+}
+
+/** Returns the RFC 3394 initial value used by the integrity check. */
+export function defaultIntegrityValue(): Uint8Array {
+  return new Uint8Array(DEFAULT_IV);
+}
