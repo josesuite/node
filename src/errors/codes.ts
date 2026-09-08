@@ -37,3 +37,27 @@ const CATEGORY_LOOKUP: ReadonlySet<string> = new Set(ERROR_CATEGORIES);
 export function isErrorCategory(value: string): value is ErrorCategory {
   return CATEGORY_LOOKUP.has(value);
 }
+
+/**
+ * Ordered stages of the validation pipeline, from configuration through to
+ * final admission checks.
+ *
+ * Recorded on failures so callers can distinguish a rejection at the required
+ * stage from one with only the required category. A token rejected
+ * with the right category but at the wrong stage means work was done that
+ * should have been skipped, such as resolving a key for an object whose
+ * algorithm was already disallowed.
+ */
+export const TRUST_STAGES = [
+  'configuration',
+  'syntax',
+  'header',
+  'key_resolution',
+  'cryptographic',
+  'nested_layer',
+  'claims_syntax',
+  'claims_semantics',
+  'context_admission',
+] as const;
+
+export type TrustStage = (typeof TRUST_STAGES)[number];
