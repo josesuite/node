@@ -17,11 +17,11 @@
  * backend rejects such a key on its own.
  */
 
-import { createPrivateKey, sign as nodeSign } from 'node:crypto';
+import { createPrivateKey, createPublicKey, sign as nodeSign, verify as nodeVerify } from 'node:crypto';
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { attempt, base64url, importJwk } from '../../internal/crypto/webcrypto.ts';
+import { attempt, attemptVerify, base64url, importJwk } from '../../internal/crypto/webcrypto.ts';
 
 interface EddsaParameters {
   readonly curve: string;
@@ -81,11 +81,50 @@ export async function signEddsa(
   return backendOk(bytes);
 }
 
+export async function verifyEddsa(
+  parameters: EddsaParameters,
+  publicJwk: { x: Uint8Array },
+  signingInput: Uint8Array,
+  signature: Uint8Array,
+): Promise<BackendResult<boolean>> {
+  // Length is public and fixed, so a wrong-length signature is rejected before
+  // the key is even constructed.
+  if (signature.length !== parameters.signatureBytes) {
+    return backendOk(false);
+  }
+
+  const jwk = { kty: 'OKP', crv: parameters.curve, x: base64url(publicJwk.x) };
+
+  if (parameters.nativeOnly) {
+    return verifyNative(jwk, signingInput, signature);
+  }
+
+  const imported = await attempt(() => importJwk(jwk, parameters.curve, ['verify']));
+  return imported.ok
+    ? attemptVerify(() =>
+        crypto.subtle.verify(parameters.curve, imported.value, toBufferSource(signature), toBufferSource(signingInput)),
+      )
+    : imported;
+}
+
 function signNative(jwk: Record<string, string>, signingInput: Uint8Array): BackendResult<Uint8Array> {
   try {
     const key = createPrivateKey({ key: jwk, format: 'jwk' });
     return backendOk(new Uint8Array(nodeSign(null, signingInput, key)));
   } catch {
     return backendError('operation_failed');
+  }
+}
+
+function verifyNative(
+  jwk: Record<string, string>,
+  signingInput: Uint8Array,
+  signature: Uint8Array,
+): BackendResult<boolean> {
+  try {
+    const key = createPublicKey({ key: jwk, format: 'jwk' });
+    return backendOk(nodeVerify(null, signingInput, key, signature));
+  } catch {
+    return backendOk(false);
   }
 }
