@@ -13,6 +13,7 @@ import type { ErrorCategory } from '../errors/codes.ts';
 import { decodeBase64url } from '../internal/encoding/base64url.ts';
 import type { JsonObject } from '../internal/json/types.ts';
 import { LIMITS_V1 } from '../policy/limits.ts';
+import type { EcCurve } from './types.ts';
 
 export interface MaterialRejection {
   readonly ok: false;
@@ -263,4 +264,129 @@ export function validateRsaPrivate(
       qi: octets['qi']!,
     },
   };
+}
+
+/** Fixed coordinate widths per EC curve; padding is significant and preserved. */
+export const EC_COORDINATE_BYTES: Readonly<Record<EcCurve, number>> = Object.freeze({
+  'P-256': 32,
+  'P-384': 48,
+  'P-521': 66,
+  secp256k1: 32,
+});
+
+/**
+ * Validates that an EC coordinate or scalar has exactly the curve's width.
+ *
+ * A short value must be left-padded by its producer; stripping or accepting a
+ * shortened form would change the value's identity and break comparison against
+ * the same key expressed canonically.
+ */
+export function validateEcComponentLength(
+  bytes: Uint8Array,
+  curve: EcCurve,
+  name: string,
+): MaterialRejection | undefined {
+  const expected = EC_COORDINATE_BYTES[curve];
+  if (bytes.length !== expected) {
+    return reject(`${name}_wrong_length`);
+  }
+  return undefined;
+}
+
+export interface EcMaterial {
+  readonly curve: EcCurve;
+  readonly x: Uint8Array;
+  readonly y: Uint8Array;
+  readonly d: Uint8Array | undefined;
+}
+
+/**
+ * Validates EC key material: coordinate widths, the point lying on the curve,
+ * and, for a private key, that the supplied point is the one the scalar
+ * actually generates.
+ *
+ * The consistency check recomputes the public point from `d` by scalar
+ * multiplication. It deliberately does not sign with the key and verify under
+ * the supplied public value: a mismatched pair can still produce a
+ * self-consistent signature, so that would establish nothing.
+ */
+export function validateEcMaterial(
+  jwk: JsonObject,
+  curve: EcCurve,
+  derivePublicPoint: (
+    curve: string,
+    scalar: Uint8Array,
+  ) => { ok: true; value: { x: Uint8Array; y: Uint8Array } } | { ok: false },
+  validatePoint: (curve: string, point: { x: Uint8Array; y: Uint8Array }) => { ok: boolean },
+): { readonly ok: true; readonly material: EcMaterial } | MaterialRejection {
+  // Decoding allows more than the exact width so that a wrong-width coordinate
+  // is reported as malformed key material rather than as a resource limit. The
+  // allowance stays bounded by the largest supported coordinate, so an
+  // arbitrarily long value is still refused before it is decoded.
+  const decodeAllowance = EC_COORDINATE_BYTES['P-521'];
+
+  const xResult = decodeMember(jwk, 'x', decodeAllowance);
+  if (!xResult.ok) {
+    return xResult;
+  }
+  const xInvalid = validateEcComponentLength(xResult.bytes, curve, 'x');
+  if (xInvalid !== undefined) {
+    return xInvalid;
+  }
+
+  const yResult = decodeMember(jwk, 'y', decodeAllowance);
+  if (!yResult.ok) {
+    return yResult;
+  }
+  const yInvalid = validateEcComponentLength(yResult.bytes, curve, 'y');
+  if (yInvalid !== undefined) {
+    return yInvalid;
+  }
+
+  const point = { x: xResult.bytes, y: yResult.bytes };
+
+  // Rejects coordinates outside the field, points off the curve, and the point
+  // at infinity, any of which would make the key unusable as an identity.
+  if (!validatePoint(curve, point).ok) {
+    return reject('point_not_on_curve');
+  }
+
+  if (!jwk.members.has('d')) {
+    return { ok: true, material: { curve, x: point.x, y: point.y, d: undefined } };
+  }
+
+  const dResult = decodeMember(jwk, 'd', decodeAllowance);
+  if (!dResult.ok) {
+    return dResult;
+  }
+  const dInvalid = validateEcComponentLength(dResult.bytes, curve, 'd');
+  if (dInvalid !== undefined) {
+    return dInvalid;
+  }
+
+  // Also enforces `1 <= d < n`, since a scalar outside that range has no
+  // corresponding public point.
+  const derived = derivePublicPoint(curve, dResult.bytes);
+  if (!derived.ok) {
+    return reject('private_scalar_invalid');
+  }
+
+  if (!bytesEqual(derived.value.x, point.x) || !bytesEqual(derived.value.y, point.y)) {
+    return reject('public_private_mismatch');
+  }
+
+  return { ok: true, material: { curve, x: point.x, y: point.y, d: dResult.bytes } };
+}
+
+/** Plain equality for public values; no secret is compared here. */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
 }
