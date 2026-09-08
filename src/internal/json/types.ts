@@ -63,3 +63,15 @@ export interface JsonNull {
   readonly kind: 'null';
   readonly span: JsonSpan;
 }
+
+export function isJsonObject(value: JsonValue): value is JsonObject {
+  return value.kind === 'object';
+}
+
+export function isJsonString(value: JsonValue): value is JsonString {
+  return value.kind === 'string';
+}
+
+export function isJsonArray(value: JsonValue): value is JsonArray {
+  return value.kind === 'array';
+}
