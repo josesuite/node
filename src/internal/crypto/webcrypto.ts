@@ -56,3 +56,26 @@ export async function attemptVerify(operation: () => Promise<boolean>): Promise<
     return backendOk(false);
   }
 }
+
+export async function importRaw(
+  bytes: Uint8Array,
+  algorithm: AlgorithmIdentifier | HmacImportParams | AesKeyAlgorithm,
+  usages: readonly KeyUsage[],
+): Promise<CryptoKey> {
+  return crypto.subtle.importKey('raw', toBufferSource(bytes), algorithm, false, usages as KeyUsage[]);
+}
+
+/**
+ * Imports a JWK.
+ *
+ * `extractable` stays false unless a caller needs the octets back, so key
+ * material cannot be read out of a handle that had no reason to expose it.
+ */
+export async function importJwk(
+  jwk: JsonWebKey,
+  algorithm: AlgorithmIdentifier | RsaHashedImportParams | EcKeyImportParams,
+  usages: readonly KeyUsage[],
+  extractable = false,
+): Promise<CryptoKey> {
+  return crypto.subtle.importKey('jwk', jwk, algorithm, extractable, usages as KeyUsage[]);
+}
