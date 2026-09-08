@@ -10,11 +10,11 @@
 
 import { backendError, type BackendResult } from '../internal/crypto/backend.ts';
 import { isImportedKey, type UsableKey } from '../key/import.ts';
-import { eddsaParameters, signEddsa } from './jws/eddsa.ts';
-import { signEcdsa } from './jws/ecdsa.ts';
-import { computeHmac } from './jws/hmac.ts';
-import { signRsaPkcs1 } from './jws/rsassa-pkcs1-v1_5.ts';
-import { signRsaPss } from './jws/rsassa-pss.ts';
+import { eddsaParameters, signEddsa, verifyEddsa } from './jws/eddsa.ts';
+import { signEcdsa, verifyEcdsa } from './jws/ecdsa.ts';
+import { computeHmac, verifyHmac } from './jws/hmac.ts';
+import { signRsaPkcs1, verifyRsaPkcs1 } from './jws/rsassa-pkcs1-v1_5.ts';
+import { signRsaPss, verifyRsaPss } from './jws/rsassa-pss.ts';
 
 type SignatureFamily = 'hmac' | 'rsa-pkcs1' | 'rsa-pss' | 'ecdsa' | 'eddsa';
 
@@ -120,6 +120,73 @@ export async function signWithKey(
         return backendError('operation_failed');
       }
       return signEddsa(parameters, { x: material.x, d: material.d }, signingInput);
+    }
+  }
+}
+
+/**
+ * Verifies a signature or MAC against the exact signing input.
+ *
+ * A false result means the signature did not verify. A backend failure is
+ * reported separately and never collapses into either outcome, so a provider
+ * outage cannot be mistaken for a bad signature or for success.
+ */
+export async function verifyWithKey(
+  key: UsableKey,
+  signingInput: Uint8Array,
+  signature: Uint8Array,
+  options: DispatchOptions = {},
+): Promise<BackendResult<boolean>> {
+  if (!isImportedKey(key)) {
+    return backendError('operation_failed');
+  }
+
+  const family = FAMILIES[key.algorithm];
+  if (family === undefined) {
+    return backendError('unsupported');
+  }
+
+  switch (family) {
+    case 'hmac': {
+      if (key.keyType !== 'oct') {
+        return backendError('operation_failed');
+      }
+      return verifyHmac(key.algorithm, key.material, signingInput, signature);
+    }
+    case 'rsa-pkcs1': {
+      if (key.keyType !== 'RSA') {
+        return backendError('operation_failed');
+      }
+      return verifyRsaPkcs1(key.algorithm, key.material, signingInput, signature);
+    }
+    case 'rsa-pss': {
+      if (key.keyType !== 'RSA') {
+        return backendError('operation_failed');
+      }
+      return verifyRsaPss(key.algorithm, key.material, signingInput, signature);
+    }
+    case 'ecdsa': {
+      if (key.keyType !== 'EC') {
+        return backendError('operation_failed');
+      }
+      const material = key.material;
+      return verifyEcdsa(key.algorithm, { crv: material.curve, x: material.x, y: material.y }, signingInput, signature);
+    }
+    case 'eddsa': {
+      if (key.keyType !== 'OKP') {
+        return backendError('operation_failed');
+      }
+      const material = key.material;
+      const parameters = eddsaParameters(key.algorithm, options.legacyEddsaCurve);
+      if (parameters === undefined) {
+        return backendError('unsupported');
+      }
+      // The bound curve must match the key's own curve; the identifier
+      // selects which curve policy applies, never a different key.
+      if (parameters.curve !== material.curve) {
+        return backendError('operation_failed');
+      }
+      return verifyEddsa(parameters, { x: material.x }, signingInput, signature);
     }
   }
 }
