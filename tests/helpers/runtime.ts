@@ -27,3 +27,14 @@ export function supportsCurve(curve: string): boolean {
 export function availableCurves(candidates: readonly string[]): readonly string[] {
   return candidates.filter(supportsCurve);
 }
+
+/** Flips a bit in a copy of `bytes`, for corrupting signatures, tags, and ciphertext. */
+export function flipBit(bytes: Uint8Array, index = 0, mask = 0x01): Uint8Array {
+  const copy = new Uint8Array(bytes);
+  const current = copy[index];
+  if (current === undefined) {
+    throw new RangeError('flipBit index out of range');
+  }
+  copy[index] = current ^ mask;
+  return copy;
+}
