@@ -26,3 +26,12 @@ export function encodeAscii(input: string): AsciiResult {
 
   return { ok: true, bytes };
 }
+
+export function isAscii(input: string): boolean {
+  for (let i = 0; i < input.length; i += 1) {
+    if (input.charCodeAt(i) > 0x7f) {
+      return false;
+    }
+  }
+  return true;
+}
