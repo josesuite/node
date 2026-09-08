@@ -48,3 +48,15 @@ export function concatBytes(...parts: readonly Uint8Array[]): Uint8Array {
   }
   return result;
 }
+
+/**
+ * Best-effort clearing of a mutable secret buffer.
+ *
+ * This is deliberately not a guarantee of zeroization. A managed runtime may
+ * have copied these bytes during garbage collection, buffer growth, or swap,
+ * and those copies are unreachable from here. Callers must not rely on this to
+ * erase every trace of a secret.
+ */
+export function clearBytes(secret: Uint8Array): void {
+  secret.fill(0);
+}
