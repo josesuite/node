@@ -23,3 +23,23 @@ export type KeyOperation = 'sign' | 'verify' | 'encrypt' | 'decrypt' | 'wrapKey'
 
 /** The two mutually exclusive purposes a key may declare. */
 export type KeyUse = 'sig' | 'enc';
+
+/**
+ * Operations permitted for each declared `use`. A key that declares one purpose
+ * and an operation belonging to the other is self-contradictory about what it
+ * is for, and is rejected at import rather than admitted and refused later.
+ */
+export const OPERATIONS_BY_USE: Readonly<Record<KeyUse, ReadonlySet<KeyOperation>>> = Object.freeze({
+  sig: new Set<KeyOperation>(['sign', 'verify']),
+  enc: new Set<KeyOperation>(['encrypt', 'decrypt', 'wrapKey', 'unwrapKey', 'deriveKey']),
+});
+
+export const KNOWN_OPERATIONS: ReadonlySet<string> = new Set<KeyOperation>([
+  'sign',
+  'verify',
+  'encrypt',
+  'decrypt',
+  'wrapKey',
+  'unwrapKey',
+  'deriveKey',
+]);
