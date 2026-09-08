@@ -71,3 +71,17 @@ export interface ImportOptions {
   /** Minimum symmetric key size the bound algorithm requires. */
   readonly minimumSymmetricBytes?: number;
 }
+
+/**
+ * Marks a record as having been produced by this module.
+ *
+ * Module-private and never exported, so a record assembled elsewhere — by
+ * spreading a real key, or built literally to satisfy the type — cannot carry
+ * it. That is what lets dispatch reject a forged key rather than operating on
+ * whatever material the caller attached.
+ */
+const IMPORTED = Symbol('imported-key');
+
+export function isImportedKey(key: UsableKey): boolean {
+  return (key as { [IMPORTED]?: true })[IMPORTED] === true;
+}
