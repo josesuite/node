@@ -10,6 +10,7 @@
 
 import { concatBytes } from '../internal/bytes.ts';
 import { encodeAscii } from '../internal/encoding/ascii.ts';
+import { encodeBase64url } from '../internal/encoding/base64url.ts';
 
 /**
  * Whether the payload travels inside the object or is supplied separately.
@@ -96,4 +97,21 @@ export function buildSigningInput(
   // Unencoded mode appends the payload octets directly after the period,
   // with no Base64url layer in between.
   return { ok: true, bytes: concatBytes(prefix.bytes, payload.octets) };
+}
+
+/**
+ * Builds the signing input for a payload this library is about to encode.
+ *
+ * Creation and verification share `buildSigningInput` so that the bytes signed
+ * and the bytes verified cannot drift apart.
+ */
+export function buildSigningInputForOctets(
+  protectedComponent: string,
+  payload: Uint8Array,
+  mode: PayloadMode,
+): SigningInputResult {
+  if (mode.encoded) {
+    return buildSigningInput(protectedComponent, { component: encodeBase64url(payload) });
+  }
+  return buildSigningInput(protectedComponent, { octets: payload });
 }
