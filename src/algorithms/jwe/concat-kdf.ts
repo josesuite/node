@@ -74,7 +74,11 @@ export function concatKdf(sharedSecret: Uint8Array, input: ConcatKdfInput): Uint
     hash.update(uint32be(round));
     hash.update(sharedSecret);
     hash.update(otherInfo);
-    derived.set(new Uint8Array(hash.digest()), (round - 1) * SHA256_BYTES);
+    // The digest is itself derived key material, so the provider's allocation is
+    // cleared once transferred rather than only the copy in `derived`.
+    const block = hash.digest();
+    derived.set(block, (round - 1) * SHA256_BYTES);
+    block.fill(0);
   }
 
   const key = derived.slice(0, input.keyBytes);

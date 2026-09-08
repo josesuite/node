@@ -113,6 +113,33 @@ function fail(
 }
 
 /**
+ * Copies the caller-owned configuration this operation decides on.
+ *
+ * The aggregate predicate and the candidate signers are read after provider
+ * awaits, so retaining the caller's objects would let the configuration change
+ * between the checks at entry and the decision at the end. Keys themselves are
+ * already immutable once imported and are referenced as-is.
+ */
+function snapshotOptions(options: JsonVerifyOptions): JsonVerifyOptions {
+  return {
+    ...options,
+    aggregate: snapshotAggregate(options.aggregate),
+    signers: options.signers.map((signer) => ({ principalId: signer.principalId, key: signer.key })),
+  };
+}
+
+function snapshotAggregate(policy: AggregatePolicy): AggregatePolicy {
+  switch (policy.kind) {
+    case 'named':
+      return { kind: 'named', principalId: policy.principalId };
+    case 'all':
+      return { kind: 'all', required: new Set(policy.required) };
+    case 'threshold':
+      return { kind: 'threshold', eligible: new Set(policy.eligible), threshold: policy.threshold };
+  }
+}
+
+/**
  * These are the same invariants a published key snapshot must satisfy. They are
  * checked here because this API accepts a signer list directly, which would
  * otherwise be a way to reach verification with a configuration the snapshot
@@ -158,16 +185,22 @@ function validateSignerConfiguration(options: JsonVerifyOptions): JsonVerifyFail
   return undefined;
 }
 
-export async function verifyJson(source: Uint8Array, options: JsonVerifyOptions): Promise<JsonVerifyResult> {
+export async function verifyJson(source: Uint8Array, callerOptions: JsonVerifyOptions): Promise<JsonVerifyResult> {
   // The signer collection is trusted configuration, so it is validated as a
   // whole before the token is looked at. The aggregate predicate counts
   // distinct principals; without these invariants one key bound to two
   // principals, or two HMAC secrets sharing an authentication capability,
   // would let a single signer satisfy a policy demanding several.
-  const limitDefect = checkLimits(options.limits);
+  const limitDefect = checkLimits(callerOptions.limits);
   if (limitDefect !== undefined) {
     return fail('configuration', 'policy_violation', limitDefect);
   }
+
+  // The configuration stays caller-owned and is read across every provider
+  // await, so it is snapshotted before validation. Without this the predicate
+  // and candidate set validated at entry need not be the ones the aggregate
+  // decision is taken under.
+  const options = snapshotOptions(callerOptions);
 
   const signers = validateSignerConfiguration(options);
   if (signers !== undefined) {
@@ -229,6 +262,13 @@ export async function verifyJson(source: Uint8Array, options: JsonVerifyOptions)
     // oxlint-disable-next-line no-await-in-loop
     const outcome = await evaluateEntry(entry, index, object.payloadComponent, payload, options, budget);
     entries.push(outcome);
+
+    // Exhaustion aborts the object rather than failing this entry alone. The
+    // remaining entries are left unevaluated, so an earlier success must not be
+    // allowed to satisfy the policy on an evaluation that never completed.
+    if (outcome.reason === BUDGET_EXHAUSTED) {
+      return fail('cryptographic', 'resource_limit', BUDGET_EXHAUSTED, entries);
+    }
 
     if (outcome.ok && outcome.principalId !== undefined) {
       established.add(outcome.principalId);
@@ -469,6 +509,15 @@ function decodeProtectedHeader(component: string, limits: Limits): DecodedHeader
   return { ok: true, object: object.object, byteLength: bytes.bytes.length };
 }
 
+/**
+ * Reason marking the one entry failure with whole-operation scope.
+ *
+ * Every other entry failure is local to its entry, but an exhausted budget is a
+ * property of the shared operation: the remaining entries cannot be evaluated
+ * either, so the aggregate decision would rest on an incomplete evaluation.
+ */
+const BUDGET_EXHAUSTED = 'cryptographic_attempt_budget_exceeded';
+
 function entryFailure(index: number, stage: TrustStage, category: ErrorCategory, reason: string): EntryOutcome {
   return { index, ok: false, principalId: undefined, header: undefined, category, stage, reason };
 }
@@ -549,7 +598,7 @@ async function evaluateEntry(
   // decides how many verifications a caller is asked to perform, so it must not
   // be able to demand unbounded work.
   if (!budget.consumeAttempt()) {
-    return entryFailure(index, 'cryptographic', 'resource_limit', 'cryptographic_attempt_budget_exceeded');
+    return entryFailure(index, 'cryptographic', 'resource_limit', BUDGET_EXHAUSTED);
   }
 
   const candidate = eligible[0]!;

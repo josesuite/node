@@ -143,10 +143,10 @@ function effectiveHmacBlock(secret: Uint8Array, algorithm: string): Uint8Array |
     return undefined;
   }
 
+  // The digest of an oversized secret is secret-derived. It is cleared directly
+  // rather than copied first, so no uncleared allocation of it remains.
   const reduced =
-    secret.length > parameters.blockBytes
-      ? new Uint8Array(createHash(parameters.hash).update(secret).digest())
-      : undefined;
+    secret.length > parameters.blockBytes ? createHash(parameters.hash).update(secret).digest() : undefined;
 
   const block = new Uint8Array(parameters.blockBytes);
   block.set(reduced ?? secret);

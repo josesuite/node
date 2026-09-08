@@ -68,23 +68,26 @@ export type JoseContext = 'jws' | 'jwe';
  * semantics, and treating it as one would let a producer demand behaviour the
  * name does not define.
  */
+const JWE_ONLY_PARAMETER_NAMES: readonly string[] = ['enc', 'zip', 'p2c', 'p2s', 'epk', 'apu', 'apv', 'iv', 'tag'];
+
 const SHARED_BASE_PARAMETER_NAMES: readonly string[] = [
-  ...STRING_PARAMETERS.filter((name) => name !== 'enc' && name !== 'zip'),
+  ...STRING_PARAMETERS,
   ...OBJECT_PARAMETERS,
   'crit',
   'x5c',
   'aud',
-];
+].filter((name) => !JWE_ONLY_PARAMETER_NAMES.includes(name));
 
 /**
- * `enc`, `zip`, and the PBES2 parameters are registered for JWE only. In a JWS
- * header such a name selects nothing, so listing it as critical is an
- * unsupported extension request rather than a malformed list naming a base
- * parameter — the specification requires those two cases to be distinguished.
+ * The content-encryption, compression, PBES2, and key-agreement parameters are
+ * registered for JWE only. In a JWS header such a name selects nothing, so
+ * listing it as critical is an unsupported extension request rather than a
+ * malformed list naming a base parameter — the specification requires those two
+ * cases to be distinguished.
  */
 const BASE_PARAMETER_NAMES: Readonly<Record<JoseContext, ReadonlySet<string>>> = Object.freeze({
   jws: new Set(SHARED_BASE_PARAMETER_NAMES),
-  jwe: new Set([...SHARED_BASE_PARAMETER_NAMES, 'enc', 'zip', 'p2c']),
+  jwe: new Set([...SHARED_BASE_PARAMETER_NAMES, ...JWE_ONLY_PARAMETER_NAMES]),
 });
 
 /**
@@ -121,12 +124,21 @@ export type SuppliedHeaderValue = string | boolean | string[] | undefined;
  * recognized-parameter types apply in both directions. Unrecognized names carry
  * no fixed type and pass through.
  */
-export function checkSuppliedParameterType(name: string, value: SuppliedHeaderValue): boolean {
+export function checkSuppliedParameterType(
+  name: string,
+  value: SuppliedHeaderValue,
+  limits: Limits = LIMITS_V1,
+): boolean {
   if (name === 'crit') {
     return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
   }
   if (name === 'x5c') {
-    return Array.isArray(value) && value.length > 0 && value.every((entry) => validCertificateEncoding(entry));
+    return (
+      Array.isArray(value) &&
+      value.length > 0 &&
+      value.length <= limits.certificateChain &&
+      value.every((entry) => validCertificateEncoding(entry, limits))
+    );
   }
   if (name === 'b64') {
     return typeof value === 'boolean';
@@ -161,6 +173,13 @@ export function validateParameterTypes(header: MergedHeader, limits: Limits = LI
   if (x5c !== undefined) {
     if (x5c.value.kind !== 'array' || x5c.value.elements.length === 0) {
       return reject('invalid_header', 'x5c_not_a_nonempty_array');
+    }
+    // The bound applies even though the chain is an ignored hint here: the array
+    // is attacker-supplied and is counted before its entries are decoded, so an
+    // unbounded chain cannot impose work regardless of whether trust is
+    // evaluated from it.
+    if (x5c.value.elements.length > limits.certificateChain) {
+      return reject('resource_limit', 'x5c_chain_too_long');
     }
     for (const certificate of x5c.value.elements) {
       if (certificate.kind !== 'string' || !validCertificateEncoding(certificate.value, limits)) {

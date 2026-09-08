@@ -790,4 +790,64 @@ describe('resource limits reach the whole operation', () => {
     expect(result.entries[0]!.ok).toBe(true);
     expect(result.entries[1]!.reason).toBe('cryptographic_attempt_budget_exceeded');
   });
+
+  test('exhausting the budget rejects the object even when the policy is already satisfied', async () => {
+    // The entry that exhausts the budget leaves the remaining entries
+    // unevaluated. An earlier success must not carry the aggregate decision on
+    // an evaluation that never completed, so exhaustion is object-scoped.
+    const alice = ecSigner('alice');
+    const bob = ecSigner('bob');
+    const serialized = await sign([alice, bob], ['ES256']);
+
+    const result = await verify(serialized, trust(alice, bob), namedSigner('alice'), ['ES256'], {
+      limits: lowerLimits({ cryptographicAttempts: 1 }),
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.category).toBe('resource_limit');
+      expect(result.reason).toBe('cryptographic_attempt_budget_exceeded');
+      // The entry that succeeded before exhaustion is still reported.
+      expect(result.entries[0]!.ok).toBe(true);
+    }
+  });
+});
+
+describe('the operation decides on the configuration it validated', () => {
+  test('mutating the aggregate policy after the call does not change the decision', async () => {
+    // The policy stays caller-owned and is applied after the provider awaits.
+    // Repointing it mid-flight would let the decision rest on a predicate the
+    // configuration checks never saw.
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+
+    const aggregate = { kind: 'named' as const, principalId: 'alice' };
+    const pending = verifyJson(new TextEncoder().encode(serialized), {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+      aggregate,
+      signers: trust(alice),
+      limits: LIMITS_V1,
+    });
+
+    aggregate.principalId = 'mallory';
+
+    expect((await pending).ok).toBe(true);
+  });
+
+  test('mutating the signer list after the call does not change the candidates', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+
+    const signers = trust(alice);
+    const pending = verifyJson(new TextEncoder().encode(serialized), {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+      aggregate: { kind: 'named', principalId: 'alice' },
+      signers,
+      limits: LIMITS_V1,
+    });
+
+    signers.length = 0;
+
+    expect((await pending).ok).toBe(true);
+  });
 });

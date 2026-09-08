@@ -126,12 +126,12 @@ export async function recoverCek(input: RecoverInput): Promise<CekRecovery> {
     case 'direct_agreement': {
       // Direct agreement derives the CEK itself, so the KDF is bound to `enc`
       // and asked for exactly the content algorithm's key size.
-      const secret = await agreeWith(input);
-      if (secret === undefined) {
-        return FAILED;
+      const agreed = await agreeWith(input);
+      if (!agreed.ok) {
+        return agreed.backendFailure ? BACKEND : FAILED;
       }
-      const derived = deriveKey(secret, input.contentAlgorithm, content.cekBytes, input.agreement);
-      secret.fill(0);
+      const derived = deriveKey(agreed.secret, input.contentAlgorithm, content.cekBytes, input.agreement);
+      agreed.secret.fill(0);
       return derived === undefined ? FAILED : { ok: true, cek: derived, owned: true };
     }
 
@@ -200,12 +200,12 @@ export async function recoverCek(input: RecoverInput): Promise<CekRecovery> {
         return FAILED;
       }
 
-      const secret = await agreeWith(input);
-      if (secret === undefined) {
-        return FAILED;
+      const agreed = await agreeWith(input);
+      if (!agreed.ok) {
+        return agreed.backendFailure ? BACKEND : FAILED;
       }
-      const kek = deriveKey(secret, input.keyAlgorithm, kekBytes, input.agreement);
-      secret.fill(0);
+      const kek = deriveKey(agreed.secret, input.keyAlgorithm, kekBytes, input.agreement);
+      agreed.secret.fill(0);
       if (kek === undefined) {
         return FAILED;
       }
@@ -230,13 +230,26 @@ function sized(cek: Uint8Array | undefined, expectedBytes: number): CekRecovery 
   return { ok: true, cek, owned: true };
 }
 
-async function agreeWith(input: RecoverInput): Promise<Uint8Array | undefined> {
+/**
+ * Outcome of an agreement attempt.
+ *
+ * A provider outage is reported separately from a rejected agreement: collapsing
+ * both into "no secret" would make an unavailable backend indistinguishable from
+ * a forged token, so an operator would read an outage as an attack.
+ */
+type Agreement =
+  | { readonly ok: true; readonly secret: Uint8Array }
+  | { readonly ok: false; readonly backendFailure: boolean };
+
+const NOT_AGREED: Agreement = { ok: false, backendFailure: false };
+
+async function agreeWith(input: RecoverInput): Promise<Agreement> {
   const headers = input.agreement;
   if (headers === undefined) {
-    return undefined;
+    return NOT_AGREED;
   }
   if (input.key.keyType !== 'EC' && input.key.keyType !== 'OKP') {
-    return undefined;
+    return NOT_AGREED;
   }
 
   const material = input.key.material as EcMaterial | OkpMaterial;
@@ -246,7 +259,12 @@ async function agreeWith(input: RecoverInput): Promise<Uint8Array | undefined> {
     y: headers.ephemeral.y,
   });
 
-  return secret.ok ? secret.value : undefined;
+  if (secret.ok) {
+    return { ok: true, secret: secret.value };
+  }
+  // An unsupported combination is a rejection; anything else is the provider
+  // failing to perform an operation it accepted.
+  return { ok: false, backendFailure: secret.failure !== 'unsupported' };
 }
 
 /**

@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { resolveB64, validateCritical, validateParameterTypes } from '../../../src/internal/headers/critical.ts';
+import {
+  checkSuppliedParameterType,
+  resolveB64,
+  validateCritical,
+  validateParameterTypes,
+} from '../../../src/internal/headers/critical.ts';
 import {
   type HeaderBudget,
   type HeaderSource,
@@ -166,6 +171,30 @@ describe('HDR-05 recognized parameter types', () => {
     expect(validateParameterTypes(header('{"p2c":"100000"}')).ok).toBe(false);
   });
 
+  test('bounds the certificate chain by the active limit', () => {
+    // The chain is an ignored hint here, but it is attacker-supplied: the count
+    // is enforced before the entries are decoded so an unbounded array cannot
+    // impose work regardless of whether trust is evaluated from it.
+    const certificate = Buffer.from(new Uint8Array(32).fill(1)).toString('base64');
+    const within = JSON.stringify({ x5c: Array.from({ length: LIMITS_V1.certificateChain }, () => certificate) });
+    expect(validateParameterTypes(header(within), LIMITS_V1).ok).toBe(true);
+
+    const over = JSON.stringify({ x5c: Array.from({ length: LIMITS_V1.certificateChain + 1 }, () => certificate) });
+    const result = validateParameterTypes(header(over), LIMITS_V1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.category).toBe('resource_limit');
+      expect(result.reason).toBe('x5c_chain_too_long');
+    }
+  });
+
+  test('bounds a supplied certificate chain at creation', () => {
+    const certificate = Buffer.from(new Uint8Array(32).fill(1)).toString('base64');
+    const within = Array.from({ length: LIMITS_V1.certificateChain }, () => certificate);
+    expect(checkSuppliedParameterType('x5c', within, LIMITS_V1)).toBe(true);
+    expect(checkSuppliedParameterType('x5c', [...within, certificate], LIMITS_V1)).toBe(false);
+  });
+
   test('validates a recognized type even when the parameter is otherwise ignored', () => {
     // A JWE-only parameter carried noncritically in a JWS still has its type
     // validated, though it selects no JWS backend.
@@ -254,6 +283,28 @@ describe('HDR-04 and HDR-06 critical extensions', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.reason).toBe('crit_names_base_parameter');
+      }
+    }
+  });
+
+  test('classifies a JWE-only key-management name as an extension request in JWS', () => {
+    // These names define key-management semantics no JWS extension implements.
+    // Naming one critical in a JWS is a well-formed request for semantics that
+    // do not exist, which the specification distinguishes from redeclaring a
+    // base parameter.
+    for (const name of ['epk', 'apu', 'apv', 'iv', 'tag', 'p2s', 'p2c']) {
+      const json = JSON.stringify({ alg: 'ES256', [name]: 'x', crit: [name] });
+      const result = validateCritical(header(json), 'jws');
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.category).toBe('unsupported_critical_parameter');
+      }
+
+      // In JWE the same name is a base parameter, so redeclaring it is malformed.
+      const inJwe = validateCritical(header(JSON.stringify({ alg: 'A128KW', [name]: 'x', crit: [name] })), 'jwe');
+      expect(inJwe.ok).toBe(false);
+      if (!inJwe.ok) {
+        expect(inJwe.reason).toBe('crit_names_base_parameter');
       }
     }
   });

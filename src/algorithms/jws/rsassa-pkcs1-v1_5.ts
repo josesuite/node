@@ -50,8 +50,15 @@ export async function verifyRsaPkcs1(
     return backendError('unsupported');
   }
 
-  return attemptVerify(async () => {
-    const key = await importJwk(rsaPublicJwk(publicJwk), { name: 'RSASSA-PKCS1-v1_5', hash }, ['verify']);
-    return crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, toBufferSource(signature), toBufferSource(signingInput));
-  });
+  // Importing the key is an operational step, not a cryptographic outcome: a
+  // rejection here means the key or the provider is unusable, which must not be
+  // reported as a signature that did not verify.
+  const key = await attempt(() => importJwk(rsaPublicJwk(publicJwk), { name: 'RSASSA-PKCS1-v1_5', hash }, ['verify']));
+  if (!key.ok) {
+    return key;
+  }
+
+  return attemptVerify(() =>
+    crypto.subtle.verify('RSASSA-PKCS1-v1_5', key.value, toBufferSource(signature), toBufferSource(signingInput)),
+  );
 }

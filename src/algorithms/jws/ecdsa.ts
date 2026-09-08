@@ -130,15 +130,22 @@ export async function verifyEcdsa(
     return verifyNative(parameters, jwk, signingInput, signature);
   }
 
-  return attemptVerify(async () => {
-    const key = await importJwk(jwk, { name: 'ECDSA', namedCurve: parameters.curve }, ['verify']);
-    return crypto.subtle.verify(
+  // Importing the key is an operational step, not a cryptographic outcome: a
+  // rejection here means the key or the provider is unusable, which must not be
+  // reported as a signature that did not verify.
+  const key = await attempt(() => importJwk(jwk, { name: 'ECDSA', namedCurve: parameters.curve }, ['verify']));
+  if (!key.ok) {
+    return key;
+  }
+
+  return attemptVerify(() =>
+    crypto.subtle.verify(
       { name: 'ECDSA', hash: parameters.hash },
-      key,
+      key.value,
       toBufferSource(signature),
       toBufferSource(signingInput),
-    );
-  });
+    ),
+  );
 }
 
 /**
@@ -176,8 +183,17 @@ function verifyNative(
     return backendError('unsupported');
   }
 
+  // Constructing the key is an operational step. Only the verification itself
+  // has a cryptographic outcome, so an unusable key is reported as a backend
+  // failure rather than as a signature that did not verify.
+  let key;
   try {
-    const key = createPublicKey({ key: jwk, format: 'jwk' });
+    key = createPublicKey({ key: jwk, format: 'jwk' });
+  } catch {
+    return backendError('operation_failed');
+  }
+
+  try {
     return backendOk(nodeVerify(hash, signingInput, { key, dsaEncoding: 'ieee-p1363' }, signature));
   } catch {
     // A provider rejection here is a failed verification, never an error that
