@@ -106,3 +106,32 @@ export function deriveOkpPublicKey(curve: string, privateKey: Uint8Array): Backe
     return backendError('operation_failed');
   }
 }
+
+/**
+ * Checks that a supplied EC point lies on the curve and is not the point at
+ * infinity, by asking the provider to import it as a public key.
+ *
+ * The provider was qualified as rejecting off-curve coordinates at import, so
+ * this delegation is sound; it is expressed as its own function so a provider
+ * change is detected at the qualification boundary.
+ */
+export function validateEcPointOnCurve(curve: string, point: EcPoint): BackendResult<undefined> {
+  if (EC_CURVE_NAMES[curve] === undefined) {
+    return backendError('unsupported');
+  }
+
+  try {
+    createPublicKey({
+      key: {
+        kty: 'EC',
+        crv: curve,
+        x: Buffer.from(point.x).toString('base64url'),
+        y: Buffer.from(point.y).toString('base64url'),
+      },
+      format: 'jwk',
+    });
+    return backendOk(undefined);
+  } catch {
+    return backendError('operation_failed');
+  }
+}
