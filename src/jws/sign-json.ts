@@ -159,7 +159,7 @@ function buildProtectedHeader(algorithm: string, signer: JsonSignerInput, limits
     }
     // A recognized parameter's JSON type is fixed, and a producer must not emit
     // what its corresponding consumer rejects.
-    if (!checkSuppliedParameterType(name, value)) {
+    if (!checkSuppliedParameterType(name, value, limits)) {
       return { ok: false, failure: fail('invalid_header', `header_${name}_wrong_type`) };
     }
     members[name] = value;
