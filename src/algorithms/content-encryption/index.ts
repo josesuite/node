@@ -9,8 +9,8 @@
  */
 
 import { backendError, type BackendResult } from '../../internal/crypto/backend.ts';
-import { CBC_IV_BYTES, cbcHmacParameters, sealCbcHmac } from './aes-cbc-hmac.ts';
-import { GCM_IV_BYTES, GCM_TAG_BYTES, gcmParameters, sealGcm } from './aes-gcm.ts';
+import { CBC_IV_BYTES, cbcHmacParameters, openCbcHmac, sealCbcHmac } from './aes-cbc-hmac.ts';
+import { GCM_IV_BYTES, GCM_TAG_BYTES, gcmParameters, openGcm, sealGcm } from './aes-gcm.ts';
 
 export interface ContentEncryptionShape {
   readonly cekBytes: number;
@@ -58,6 +58,29 @@ export async function sealContent(
   }
   if (cbcHmacParameters(algorithm) !== undefined) {
     return sealCbcHmac(algorithm, cek, iv, plaintext, additionalData);
+  }
+  return backendError('unsupported');
+}
+
+/**
+ * Authenticates and decrypts. A successful result holding `undefined` means the
+ * object did not authenticate, which is distinct from a backend failure and
+ * must stay distinct: one is an attacker-reachable outcome, the other is an
+ * operational fault.
+ */
+export async function openContent(
+  algorithm: string,
+  cek: Uint8Array,
+  iv: Uint8Array,
+  ciphertext: Uint8Array,
+  tag: Uint8Array,
+  additionalData: Uint8Array,
+): Promise<BackendResult<Uint8Array | undefined>> {
+  if (gcmParameters(algorithm) !== undefined) {
+    return openGcm(algorithm, cek, iv, ciphertext, tag, additionalData);
+  }
+  if (cbcHmacParameters(algorithm) !== undefined) {
+    return openCbcHmac(algorithm, cek, iv, ciphertext, tag, additionalData);
   }
   return backendError('unsupported');
 }
