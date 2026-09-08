@@ -244,3 +244,13 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
 function isHmacIdentity(identity: KeyIdentity): identity is Extract<KeyIdentity, { kty: 'oct' }> {
   return identity.kty === 'oct';
 }
+
+/**
+ * Counts the distinct principals in a snapshot.
+ *
+ * Deduplication is by principal rather than by entry, so one key appearing
+ * under several identifiers cannot inflate a distinct-signer count.
+ */
+export function distinctPrincipals(snapshot: KeySnapshot): ReadonlySet<string> {
+  return new Set(snapshot.entries.map((entry) => entry.principalId));
+}
