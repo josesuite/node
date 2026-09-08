@@ -33,3 +33,22 @@ export function backendOk<T>(value: T): BackendResult<T> {
 export function backendError<T = never>(failure: BackendFailure): BackendResult<T> {
   return { ok: false, failure };
 }
+
+/**
+ * Secure randomness must be operating-system-backed and fail closed: a short
+ * read or generator failure stops the operation rather
+ * than falling back to a weaker source.
+ */
+export interface RandomSource {
+  randomBytes(length: number): BackendResult<Uint8Array>;
+}
+
+/**
+ * Constant-time comparison for MAC and tag verification.
+ *
+ * Public length mismatches are rejected before comparison, since length is not
+ * secret and comparing different lengths cannot be done in constant time.
+ */
+export interface ConstantTime {
+  equal(a: Uint8Array, b: Uint8Array): boolean;
+}
