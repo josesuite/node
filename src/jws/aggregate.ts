@@ -79,3 +79,45 @@ export function thresholdOfSigners(eligible: readonly string[], threshold: numbe
   }
   return { ok: true, policy: { kind: 'threshold', eligible: set, threshold } };
 }
+
+/**
+ * Applies the predicate to the principals established by successful entries.
+ *
+ * Principals outside the configured set never contribute, so an unrelated valid
+ * signature cannot help satisfy a policy naming other signers.
+ */
+export function isSatisfied(policy: AggregatePolicy, established: ReadonlySet<string>): boolean {
+  switch (policy.kind) {
+    case 'named':
+      return established.has(policy.principalId);
+    case 'all': {
+      for (const id of policy.required) {
+        if (!established.has(id)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case 'threshold': {
+      let count = 0;
+      for (const id of policy.eligible) {
+        if (established.has(id)) {
+          count++;
+        }
+      }
+      return count >= policy.threshold;
+    }
+  }
+}
+
+/** Principals the policy refers to, used to validate signer independence. */
+export function referencedPrincipals(policy: AggregatePolicy): ReadonlySet<string> {
+  switch (policy.kind) {
+    case 'named':
+      return new Set([policy.principalId]);
+    case 'all':
+      return policy.required;
+    case 'threshold':
+      return policy.eligible;
+  }
+}
