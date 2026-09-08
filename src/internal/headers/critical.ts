@@ -297,3 +297,44 @@ export function validateCritical(header: MergedHeader, context: JoseContext): Cr
 
   return { ok: true, names };
 }
+
+/**
+ * Resolves the `b64` payload-encoding extension from RFC 7797, which
+ * selects whether the payload is Base64url-encoded in the signing input.
+ *
+ * When present it must be a boolean, must be protected, and must be listed as
+ * critical, including when it is explicitly `true`. A consumer that ignored it
+ * would build a different signing input from the one the producer signed, so it
+ * must never be an optional hint.
+ */
+export type B64Check = { readonly ok: true; readonly encoded: boolean } | HeaderRejection;
+
+export function resolveB64(
+  header: MergedHeader,
+  criticalNames: readonly string[],
+  unencodedPayloadAccepted: boolean,
+): B64Check {
+  const parameter = header.parameters.get('b64');
+  if (parameter === undefined) {
+    return { ok: true, encoded: true };
+  }
+
+  if (parameter.value.kind !== 'boolean') {
+    return reject('invalid_header', 'b64_not_a_boolean');
+  }
+  if (parameter.origin !== 'protected') {
+    return reject('invalid_header', 'b64_not_protected');
+  }
+  if (!criticalNames.includes('b64')) {
+    return reject('invalid_header', 'b64_not_critical');
+  }
+
+  // Unencoded mode changes what the signing input is built from, so accepting
+  // it is a caller decision rather than something the token can switch on. The
+  // explicit `b64: true` spelling needs no opt-in: it selects the default.
+  if (parameter.value.value === false && !unencodedPayloadAccepted) {
+    return reject('policy_violation', 'unencoded_payload_not_accepted');
+  }
+
+  return { ok: true, encoded: parameter.value.value };
+}
