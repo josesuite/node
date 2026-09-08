@@ -533,12 +533,18 @@ function checkCallerHeaders(options: EncryptOptions): EncryptResult | undefined 
   }
 
   for (const recipient of options.recipients) {
-    for (const name of Object.keys(recipient.unprotectedHeader ?? {})) {
+    const unprotected = recipient.unprotectedHeader ?? {};
+    for (const name of Object.keys(unprotected)) {
       if (PROTECTED_ONLY_NAMES.has(name)) {
         return fail('invalid_header', `unprotected_${name}_not_permitted`);
       }
       if (RESERVED_HEADER_NAMES.has(name)) {
         return fail('invalid_header', `reserved_header_${name}`);
+      }
+      // Recognized types are fixed by the parameter, not by which header source
+      // carries it, so an unprotected member is held to the same contract.
+      if (!checkSuppliedParameterType(name, unprotected[name], options.limits)) {
+        return fail('invalid_header', `header_${name}_wrong_type`);
       }
     }
   }
