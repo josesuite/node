@@ -42,3 +42,11 @@ export interface MergedHeader {
    */
   readonly sourceBytes: number;
 }
+
+export function headerValue(header: MergedHeader, name: string): JsonValue | undefined {
+  return header.parameters.get(name)?.value;
+}
+
+export function isProtected(header: MergedHeader, name: string): boolean {
+  return header.parameters.get(name)?.origin === 'protected';
+}
