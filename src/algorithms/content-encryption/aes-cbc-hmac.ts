@@ -14,6 +14,7 @@
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
+import { constantTime } from '../../internal/crypto/constant-time.ts';
 import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
 
 export interface CbcHmacParameters {
@@ -118,4 +119,66 @@ export async function sealCbcHmac(
   }
 
   return backendOk({ ciphertext, tag: tag.value });
+}
+
+/**
+ * Verifies the tag and only then decrypts.
+ *
+ * A `undefined` value means authentication failed; it is deliberately the same
+ * outcome for a wrong key, a modified ciphertext, and invalid padding, so none
+ * of those can be told apart by a caller or an observer of its behaviour.
+ */
+export async function openCbcHmac(
+  algorithm: string,
+  key: Uint8Array,
+  iv: Uint8Array,
+  ciphertext: Uint8Array,
+  tag: Uint8Array,
+  additionalData: Uint8Array,
+): Promise<BackendResult<Uint8Array | undefined>> {
+  const parameters = cbcHmacParameters(algorithm);
+  if (parameters === undefined) {
+    return backendError('unsupported');
+  }
+  if (key.length !== parameters.keyBytes) {
+    return backendError('operation_failed');
+  }
+  if (iv.length !== CBC_IV_BYTES || tag.length !== parameters.tagBytes) {
+    return backendOk(undefined);
+  }
+  // CBC output is whole blocks, and an empty ciphertext cannot carry the
+  // padding block the construction always adds.
+  if (ciphertext.length === 0 || ciphertext.length % 16 !== 0) {
+    return backendOk(undefined);
+  }
+
+  const half = parameters.keyBytes / 2;
+  const macKey = key.subarray(0, half);
+  const encryptionKey = key.subarray(half);
+
+  const expected = await computeTag(parameters, macKey, iv, ciphertext, additionalData);
+  if (!expected.ok) {
+    return expected;
+  }
+  if (!constantTime.equal(expected.value, tag)) {
+    return backendOk(undefined);
+  }
+
+  const imported = await attempt(() => importRaw(encryptionKey, { name: 'AES-CBC', length: half * 8 }, ['decrypt']));
+  if (!imported.ok) {
+    return imported;
+  }
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-CBC', iv: toBufferSource(iv) },
+      imported.value,
+      toBufferSource(ciphertext),
+    );
+    return backendOk(new Uint8Array(plaintext));
+  } catch {
+    // The tag already verified, so malformed padding here means the ciphertext
+    // was produced by something other than this construction. It stays an
+    // authentication outcome rather than a distinguishable padding error.
+    return backendOk(undefined);
+  }
 }
