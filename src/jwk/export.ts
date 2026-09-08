@@ -74,3 +74,13 @@ export function exportOkpPublicJwk(material: OkpMaterial, metadata: ExportMetada
     metadata,
   );
 }
+
+/**
+ * Symmetric keys have no public representation at all: every octet of an `oct`
+ * key is secret, so there is nothing that could be safely published. Callers
+ * asking for one have made a mistake that should surface rather than produce an
+ * empty or partial object.
+ */
+export function exportOctPublicJwk(): never {
+  throw new TypeError('a symmetric key has no public representation');
+}
