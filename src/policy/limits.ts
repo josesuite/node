@@ -152,3 +152,59 @@ const BASELINE = Object.freeze({
 
 /** The baseline itself is a validated value: every entry equals its own bound. */
 export const LIMITS_V1 = BASELINE as unknown as Limits;
+
+type LimitName = keyof typeof BASELINE;
+
+const LIMIT_KEYS = Object.keys(BASELINE) as readonly LimitName[];
+
+/**
+ * Builds an operation's limits by lowering the baseline.
+ *
+ * Only lowering is permitted. A value above the baseline is rejected rather
+ * than silently accepted, so that raising a bound is a deliberate, reviewed act
+ * and cannot happen by passing a large number at a call site.
+ */
+export function lowerLimits(overrides: Partial<Record<LimitName, number>>): Limits {
+  const result: Record<string, number> = { ...BASELINE };
+
+  for (const key of LIMIT_KEYS) {
+    const override = overrides[key];
+    if (override === undefined) {
+      continue;
+    }
+
+    if (!Number.isSafeInteger(override) || override < 0) {
+      throw new RangeError(`limit ${key} must be a non-negative safe integer`);
+    }
+    if (override > BASELINE[key]) {
+      throw new RangeError(`limit ${key} exceeds the limits-v1 baseline`);
+    }
+    result[key] = override;
+  }
+
+  return Object.freeze(result) as unknown as Limits;
+}
+
+/**
+ * Confirms a limits value is complete and no looser than the baseline.
+ *
+ * `Limits` is structural, and spreading a real one carries its brand, so the
+ * type alone cannot stop a caller passing an inflated bound at a public entry
+ * point. Checking here means an operation either runs under limits that were
+ * genuinely lowered or does not run at all.
+ */
+export function checkLimits(limits: Limits): string | undefined {
+  const values = limits as unknown as Partial<Record<LimitName, unknown>>;
+
+  for (const key of LIMIT_KEYS) {
+    const value = values[key];
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+      return `limit_${key}_invalid`;
+    }
+    if (value > BASELINE[key]) {
+      return `limit_${key}_exceeds_baseline`;
+    }
+  }
+
+  return undefined;
+}
