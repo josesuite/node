@@ -10,6 +10,7 @@
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
+import { constantTime } from '../../internal/crypto/constant-time.ts';
 import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
 
 interface HmacParameters {
@@ -51,4 +52,42 @@ export async function computeHmac(
   });
 
   return result.ok ? backendOk(new Uint8Array(result.value)) : result;
+}
+
+/**
+ * Verifies a MAC.
+ *
+ * The comparison is constant-time and done here rather than through the
+ * provider's own verify, so the timing behaviour is the one this library
+ * qualified. The public length check happens first: a wrong-length signature is
+ * a structural defect that reveals nothing secret, whereas comparing contents
+ * byte by byte would let an attacker recover a valid MAC one octet at a time.
+ */
+export async function verifyHmac(
+  algorithm: string,
+  key: Uint8Array,
+  signingInput: Uint8Array,
+  signature: Uint8Array,
+): Promise<BackendResult<boolean>> {
+  const parameters = HMAC_ALGORITHMS[algorithm];
+  if (parameters === undefined) {
+    return backendError('unsupported');
+  }
+
+  // JWS carries the complete MAC; a truncated one is not a valid signature.
+  if (signature.length !== parameters.outputBytes) {
+    return backendOk(false);
+  }
+
+  const expected = await computeHmac(algorithm, key, signingInput);
+  if (!expected.ok) {
+    return expected;
+  }
+
+  try {
+    return backendOk(constantTime.equal(expected.value, signature));
+  } finally {
+    // The expected MAC is derived from the key and is not needed afterwards.
+    expected.value.fill(0);
+  }
 }
