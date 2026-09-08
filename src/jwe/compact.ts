@@ -14,7 +14,9 @@
  */
 
 import type { ErrorCategory, TrustStage } from '../errors/codes.ts';
+import { type DecryptOptions, type DecryptResult, decryptParsed } from './decrypt.ts';
 import { type EncryptOptions, encryptJson } from './encrypt.ts';
+import { parseCompactJwe } from './parse.ts';
 
 export type CompactEncryptResult =
   | { readonly ok: true; readonly token: string }
@@ -76,4 +78,13 @@ export async function encryptCompact(
   }
 
   return { ok: true, token: components.join('.') };
+}
+
+export async function decryptCompact(token: string, options: DecryptOptions): Promise<DecryptResult> {
+  const parsed = parseCompactJwe(token, options.limits);
+  if (!parsed.ok) {
+    return { ok: false, category: parsed.category, stage: 'syntax', reason: parsed.reason };
+  }
+
+  return decryptParsed(parsed.value, options);
 }
