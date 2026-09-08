@@ -7,6 +7,9 @@
  * absent limit is not expressible.
  */
 
+const KIB = 1024;
+const MIB = 1024 * 1024;
+
 /**
  * Marks a value as having passed `lowerLimits`.
  *
@@ -86,3 +89,66 @@ export interface Limits {
   readonly concurrentRefreshesPerIssuer: number;
   readonly negativeCacheEntriesPerIssuer: number;
 }
+
+const BASELINE = Object.freeze({
+  jwtInput: 16 * KIB,
+  joseInput: MIB,
+  headerSource: 8 * KIB,
+  totalHeaderSource: 32 * KIB,
+  payload: 256 * KIB,
+  detachedPayload: 256 * KIB,
+  ciphertext: 512 * KIB,
+  externalAad: 16 * KIB,
+
+  jsonDepth: 32,
+  jsonObjectMembers: 128,
+  mergedHeaderMembers: 64,
+  jsonArrayElements: 1024,
+  jsonNodes: 65_536,
+  jsonString: 256 * KIB,
+  numberLexeme: 128,
+  numberExponentMagnitude: 308,
+
+  signatures: 8,
+  recipients: 8,
+  cryptographicLayers: 2,
+  candidateKeys: 1,
+  cryptographicAttempts: 16,
+
+  jwksKeys: 100,
+  serializedJwk: 16 * KIB,
+  remoteJwksResponse: MIB,
+
+  rsaModulusBits: 8192,
+  symmetricKeyOctets: 128,
+  signatureOctets: 8 * KIB,
+
+  kid: 256,
+  jti: 256,
+  identifier: 1024,
+  algorithmName: 64,
+  url: 2048,
+
+  certificateChain: 5,
+  derCertificate: 16 * KIB,
+
+  pbes2Salt: 64,
+  pbes2Password: 1024,
+  pbes2IterationsMin: 100_000,
+  pbes2IterationsMax: 1_000_000,
+  pbkdf2PrfEvaluations: 1_000_000,
+
+  compressedInput: 64 * KIB,
+  decompressedOutput: 256 * KIB,
+  decompressionRatio: 20,
+
+  remoteConnectionMs: 2000,
+  remoteRequestMs: 5000,
+  networkAttempts: 1,
+  redirects: 0,
+  concurrentRefreshesPerIssuer: 1,
+  negativeCacheEntriesPerIssuer: 100,
+});
+
+/** The baseline itself is a validated value: every entry equals its own bound. */
+export const LIMITS_V1 = BASELINE as unknown as Limits;
