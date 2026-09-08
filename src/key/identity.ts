@@ -97,3 +97,20 @@ export function sameKeyMaterial(a: KeyIdentity, b: KeyIdentity): boolean {
 
   return false;
 }
+
+/**
+ * Whether equality of these two keys' public representations also establishes
+ * that they belong to the same holder.
+ *
+ * For the agreement curves it does not: several publicly computable public
+ * values produce the same shared secrets, so unequal representations are not
+ * proof of distinct holders. Where a policy depends on distinct principals,
+ * trusted provisioning has to supply an underlying identity instead. The
+ * implementation does not compute curve equivalence itself.
+ */
+export function representationImpliesHolderIdentity(identity: KeyIdentity): boolean {
+  if (identity.kty !== 'OKP') {
+    return true;
+  }
+  return identity.crv !== 'X25519' && identity.crv !== 'X448';
+}
