@@ -12,6 +12,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
 import { constantTime } from '../internal/crypto/constant-time.ts';
+import type { KeyType } from './types.ts';
 
 /**
  * The canonical members compared for each key type.
@@ -178,4 +179,11 @@ export function sameHmacDomain(a: Uint8Array, b: Uint8Array, algorithm: string):
     blockA.fill(0);
     blockB.fill(0);
   }
+}
+
+/** Key types whose thumbprint may be used to index candidates. */
+export function mayIndexByThumbprint(keyType: KeyType): boolean {
+  // A symmetric thumbprint is secret-derived, so it is never usable as a
+  // lookup key or public identifier.
+  return keyType !== 'oct';
 }
