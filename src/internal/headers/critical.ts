@@ -68,23 +68,26 @@ export type JoseContext = 'jws' | 'jwe';
  * semantics, and treating it as one would let a producer demand behaviour the
  * name does not define.
  */
+const JWE_ONLY_PARAMETER_NAMES: readonly string[] = ['enc', 'zip', 'p2c', 'p2s', 'epk', 'apu', 'apv', 'iv', 'tag'];
+
 const SHARED_BASE_PARAMETER_NAMES: readonly string[] = [
-  ...STRING_PARAMETERS.filter((name) => name !== 'enc' && name !== 'zip'),
+  ...STRING_PARAMETERS,
   ...OBJECT_PARAMETERS,
   'crit',
   'x5c',
   'aud',
-];
+].filter((name) => !JWE_ONLY_PARAMETER_NAMES.includes(name));
 
 /**
- * `enc`, `zip`, and the PBES2 parameters are registered for JWE only. In a JWS
- * header such a name selects nothing, so listing it as critical is an
- * unsupported extension request rather than a malformed list naming a base
- * parameter — the specification requires those two cases to be distinguished.
+ * The content-encryption, compression, PBES2, and key-agreement parameters are
+ * registered for JWE only. In a JWS header such a name selects nothing, so
+ * listing it as critical is an unsupported extension request rather than a
+ * malformed list naming a base parameter — the specification requires those two
+ * cases to be distinguished.
  */
 const BASE_PARAMETER_NAMES: Readonly<Record<JoseContext, ReadonlySet<string>>> = Object.freeze({
   jws: new Set(SHARED_BASE_PARAMETER_NAMES),
-  jwe: new Set([...SHARED_BASE_PARAMETER_NAMES, 'enc', 'zip', 'p2c']),
+  jwe: new Set([...SHARED_BASE_PARAMETER_NAMES, ...JWE_ONLY_PARAMETER_NAMES]),
 });
 
 /**
