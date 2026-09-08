@@ -130,15 +130,22 @@ export async function verifyEcdsa(
     return verifyNative(parameters, jwk, signingInput, signature);
   }
 
-  return attemptVerify(async () => {
-    const key = await importJwk(jwk, { name: 'ECDSA', namedCurve: parameters.curve }, ['verify']);
-    return crypto.subtle.verify(
+  // Importing the key is an operational step, not a cryptographic outcome: a
+  // rejection here means the key or the provider is unusable, which must not be
+  // reported as a signature that did not verify.
+  const key = await attempt(() => importJwk(jwk, { name: 'ECDSA', namedCurve: parameters.curve }, ['verify']));
+  if (!key.ok) {
+    return key;
+  }
+
+  return attemptVerify(() =>
+    crypto.subtle.verify(
       { name: 'ECDSA', hash: parameters.hash },
-      key,
+      key.value,
       toBufferSource(signature),
       toBufferSource(signingInput),
-    );
-  });
+    ),
+  );
 }
 
 /**
