@@ -522,7 +522,7 @@ function checkCallerHeaders(options: EncryptOptions): EncryptResult | undefined 
   const supplied = options.protectedHeader ?? {};
 
   for (const name of Object.keys(supplied)) {
-    if (!checkSuppliedParameterType(name, supplied[name])) {
+    if (!checkSuppliedParameterType(name, supplied[name], options.limits)) {
       return fail('invalid_header', `header_${name}_wrong_type`);
     }
   }
