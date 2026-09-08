@@ -6,6 +6,7 @@
 import type { ErrorCategory } from '../../errors/codes.ts';
 import { LIMITS_V1, type Limits } from '../../policy/limits.ts';
 import { utf8Length } from '../encoding/utf8.ts';
+import type { JsonValue } from '../json/types.ts';
 import type { MergedHeader } from './types.ts';
 
 export interface HeaderRejection {
@@ -195,4 +196,104 @@ function validCertificateEncoding(value: string, limits: Limits = LIMITS_V1): bo
   }
   const bytes = Buffer.from(value, 'base64');
   return bytes.length > 0 && bytes.length <= limits.derCertificate && bytes.toString('base64') === value;
+}
+
+export interface CriticalResult {
+  readonly ok: true;
+  /** Names listed in `crit`, in source order. Empty when `crit` is absent. */
+  readonly names: readonly string[];
+}
+
+/**
+ * A list that is structurally sound but names an extension without implemented
+ * semantics. The names are still reported: the parameters they refer to were
+ * validly declared, and a whole-object check may need the declared value even
+ * though this entry cannot itself be accepted.
+ */
+export interface CriticalUnimplemented {
+  readonly ok: false;
+  readonly category: 'unsupported_critical_parameter';
+  readonly reason: 'critical_extension_not_implemented';
+  readonly names: readonly string[];
+}
+
+export type CriticalCheck = CriticalResult | CriticalUnimplemented | HeaderRejection;
+
+/**
+ * Validates `crit` construction and confirms every listed extension has
+ * implemented semantics.
+ *
+ * `crit` must be protected, nonempty, an array of distinct strings, and every
+ * listed name must be present in the header. A listed name whose semantics are
+ * not implemented is rejected outright, which is what keeps a critical
+ * extension from degrading into an ignored hint: the producer marked it as
+ * something the recipient must act on, so proceeding without acting on it would
+ * accept an object under weaker terms than the producer intended.
+ */
+export function validateCritical(header: MergedHeader, context: JoseContext): CriticalCheck {
+  const parameter = header.parameters.get('crit');
+  if (parameter === undefined) {
+    return { ok: true, names: [] };
+  }
+
+  // The critical list itself must be protected. An unprotected list
+  // could be stripped or rewritten in transit without invalidating the
+  // signature.
+  if (parameter.origin !== 'protected') {
+    return reject('invalid_header', 'crit_not_protected');
+  }
+
+  const value: JsonValue = parameter.value;
+  if (value.kind !== 'array') {
+    return reject('invalid_header', 'crit_not_an_array');
+  }
+  if (value.elements.length === 0) {
+    return reject('invalid_header', 'crit_empty');
+  }
+
+  const names: string[] = [];
+  const seen = new Set<string>();
+  let unimplemented = false;
+
+  for (const element of value.elements) {
+    if (element.kind !== 'string') {
+      return reject('invalid_header', 'crit_entry_not_a_string');
+    }
+    const name = element.value;
+
+    if (seen.has(name)) {
+      return reject('invalid_header', 'crit_duplicate_name');
+    }
+    seen.add(name);
+
+    // A base-specification parameter is not an extension; listing one is a
+    // malformed critical list rather than an unsupported extension request.
+    if (BASE_PARAMETER_NAMES[context].has(name)) {
+      return reject('invalid_header', 'crit_names_base_parameter');
+    }
+
+    // Every listed name must actually be present in the header.
+    if (!header.parameters.has(name)) {
+      return reject('invalid_header', 'crit_names_absent_parameter');
+    }
+
+    names.push(name);
+
+    // Recorded rather than returned immediately, so the remaining names are
+    // still checked for the malformed-list defects above, which take precedence.
+    if (!IMPLEMENTED_CRITICAL_EXTENSIONS[context].has(name)) {
+      unimplemented = true;
+    }
+  }
+
+  if (unimplemented) {
+    return {
+      ok: false,
+      category: 'unsupported_critical_parameter',
+      reason: 'critical_extension_not_implemented',
+      names,
+    };
+  }
+
+  return { ok: true, names };
 }
