@@ -75,3 +75,34 @@ export function deriveEcPublicPoint(curve: string, privateScalar: Uint8Array): B
     return backendError('operation_failed');
   }
 }
+
+/**
+ * Computes the public key octets for an OKP private key.
+ *
+ * Unlike the EC case, exporting an imported OKP private key returns the key
+ * actually derived from `d`, so the provider's own derivation is used.
+ */
+export function deriveOkpPublicKey(curve: string, privateKey: Uint8Array): BackendResult<Uint8Array> {
+  try {
+    const key = createPrivateKey({
+      key: {
+        kty: 'OKP',
+        crv: curve,
+        // A private OKP JWK requires `x`, but the provider recomputes it from
+        // `d`; a placeholder of the right length is replaced by the derivation.
+        x: Buffer.alloc(privateKey.length).toString('base64url'),
+        d: Buffer.from(privateKey).toString('base64url'),
+      },
+      format: 'jwk',
+    });
+
+    const exported = createPublicKey(key).export({ format: 'jwk' });
+    if (typeof exported.x !== 'string') {
+      return backendError('operation_failed');
+    }
+
+    return backendOk(new Uint8Array(Buffer.from(exported.x, 'base64url')));
+  } catch {
+    return backendError('operation_failed');
+  }
+}
