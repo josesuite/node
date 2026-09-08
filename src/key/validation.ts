@@ -467,3 +467,29 @@ export function validateOkpMaterial(
 
   return { ok: true, material: { curve, x: xResult.bytes, d: dResult.bytes } };
 }
+
+/**
+ * Validates symmetric key material.
+ *
+ * `minimumBytes` is the algorithm's own floor, such as the hash output size for
+ * an HMAC algorithm. A length check is a necessary bound but is never evidence
+ * of entropy: a long, predictable value passes it, so trusted provisioning has
+ * to establish where the secret came from.
+ */
+export function validateOctMaterial(
+  jwk: JsonObject,
+  minimumBytes: number,
+): { readonly ok: true; readonly key: Uint8Array } | MaterialRejection {
+  const result = decodeMember(jwk, 'k', LIMITS_V1.symmetricKeyOctets);
+  if (!result.ok) {
+    return result;
+  }
+
+  if (result.bytes.length < minimumBytes) {
+    // Too short for the bound algorithm: the key is valid material but cannot
+    // satisfy this binding.
+    return reject('k_too_short', 'incompatible_key');
+  }
+
+  return { ok: true, key: result.bytes };
+}
