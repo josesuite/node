@@ -19,6 +19,10 @@
  * the attacker can afford, unconstrained by these limits.
  */
 
+import { toBufferSource } from '../../internal/bytes.ts';
+import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
+import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
+
 export interface Pbes2Parameters {
   readonly hash: string;
   /** Derived KEK size, which is also the AES-KW variant's key size. */
@@ -79,4 +83,64 @@ export function checkWorkFactor(algorithm: string, saltInput: Uint8Array, iterat
     return { ok: false, reason: 'iterations_above_maximum' };
   }
   return { ok: true };
+}
+
+/**
+ * Builds the PBKDF2 salt.
+ *
+ * The zero octet separates the algorithm name from the salt input so that no
+ * two distinct pairs can produce the same salt; without it, a name ending in
+ * the salt's leading bytes would collide with a shorter name and longer salt.
+ */
+export function buildSalt(algorithm: string, saltInput: Uint8Array): Uint8Array {
+  const name = new TextEncoder().encode(algorithm);
+  const salt = new Uint8Array(name.length + 1 + saltInput.length);
+  salt.set(name, 0);
+  salt[name.length] = 0x00;
+  salt.set(saltInput, name.length + 1);
+  return salt;
+}
+
+/**
+ * Derives the KEK from an explicit password.
+ *
+ * The password arrives as octets. A text-facing adapter converts with UTF-8 and
+ * must not trim or normalize: doing so would silently accept a different
+ * password than the user supplied, and would make two visually identical
+ * passwords derive different keys depending on which adapter ran.
+ */
+export async function derivePbes2Key(
+  algorithm: string,
+  password: Uint8Array,
+  saltInput: Uint8Array,
+  iterations: number,
+): Promise<BackendResult<Uint8Array>> {
+  const parameters = pbes2Parameters(algorithm);
+  if (parameters === undefined) {
+    return backendError('unsupported');
+  }
+
+  // The bounds are enforced here as well as at the call site: this function
+  // performs the expensive work, so it must not depend on a caller having
+  // checked first.
+  const bounded = checkWorkFactor(algorithm, saltInput, iterations);
+  if (!bounded.ok) {
+    return backendError('operation_failed');
+  }
+
+  const result = await attempt(async () => {
+    const handle = await importRaw(password, 'PBKDF2', ['deriveBits']);
+    return crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt: toBufferSource(buildSalt(algorithm, saltInput)),
+        iterations,
+        hash: parameters.hash,
+      },
+      handle,
+      parameters.keyBytes * 8,
+    );
+  });
+
+  return result.ok ? backendOk(new Uint8Array(result.value)) : result;
 }
