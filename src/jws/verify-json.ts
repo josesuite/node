@@ -263,6 +263,13 @@ export async function verifyJson(source: Uint8Array, callerOptions: JsonVerifyOp
     const outcome = await evaluateEntry(entry, index, object.payloadComponent, payload, options, budget);
     entries.push(outcome);
 
+    // Exhaustion aborts the object rather than failing this entry alone. The
+    // remaining entries are left unevaluated, so an earlier success must not be
+    // allowed to satisfy the policy on an evaluation that never completed.
+    if (outcome.reason === BUDGET_EXHAUSTED) {
+      return fail('cryptographic', 'resource_limit', BUDGET_EXHAUSTED, entries);
+    }
+
     if (outcome.ok && outcome.principalId !== undefined) {
       established.add(outcome.principalId);
     }
@@ -502,6 +509,15 @@ function decodeProtectedHeader(component: string, limits: Limits): DecodedHeader
   return { ok: true, object: object.object, byteLength: bytes.bytes.length };
 }
 
+/**
+ * Reason marking the one entry failure with whole-operation scope.
+ *
+ * Every other entry failure is local to its entry, but an exhausted budget is a
+ * property of the shared operation: the remaining entries cannot be evaluated
+ * either, so the aggregate decision would rest on an incomplete evaluation.
+ */
+const BUDGET_EXHAUSTED = 'cryptographic_attempt_budget_exceeded';
+
 function entryFailure(index: number, stage: TrustStage, category: ErrorCategory, reason: string): EntryOutcome {
   return { index, ok: false, principalId: undefined, header: undefined, category, stage, reason };
 }
@@ -582,7 +598,7 @@ async function evaluateEntry(
   // decides how many verifications a caller is asked to perform, so it must not
   // be able to demand unbounded work.
   if (!budget.consumeAttempt()) {
-    return entryFailure(index, 'cryptographic', 'resource_limit', 'cryptographic_attempt_budget_exceeded');
+    return entryFailure(index, 'cryptographic', 'resource_limit', BUDGET_EXHAUSTED);
   }
 
   const candidate = eligible[0]!;
