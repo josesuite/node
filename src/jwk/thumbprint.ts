@@ -111,6 +111,44 @@ function computeValidatedThumbprint(keyType: string, members: Readonly<Record<st
   return { ok: true, thumbprint: encodeBase64url(new Uint8Array(digest)) };
 }
 
+/** The only hash label this project emits or accepts in a thumbprint URI. */
+const THUMBPRINT_URI_PREFIX = 'urn:ietf:params:oauth:jwk-thumbprint:sha-256:';
+
+/** Length of an unpadded Base64url SHA-256 digest. */
+const SHA256_BASE64URL_LENGTH = 43;
+
+export function toThumbprintUri(thumbprint: string): ThumbprintResult & { readonly uri?: string } {
+  const decoded = decodeBase64url(thumbprint, 32);
+  return decoded.ok && decoded.bytes.length === 32
+    ? { ok: true, thumbprint, uri: `${THUMBPRINT_URI_PREFIX}${thumbprint}` }
+    : { ok: false, reason: 'digest_invalid' };
+}
+
+/**
+ * Parses a thumbprint URI.
+ *
+ * The entire string must match: this is an identifier, not a URL, so it is
+ * never fetched, percent-decoded, or matched by prefix alone. Only SHA-256 is
+ * accepted, which is narrower than the registry permits.
+ */
+export function parseThumbprintUri(uri: string): ThumbprintResult {
+  if (!uri.startsWith(THUMBPRINT_URI_PREFIX)) {
+    return { ok: false, reason: 'unsupported_prefix' };
+  }
+
+  const thumbprint = uri.slice(THUMBPRINT_URI_PREFIX.length);
+  if (thumbprint.length !== SHA256_BASE64URL_LENGTH) {
+    return { ok: false, reason: 'digest_wrong_length' };
+  }
+
+  const decoded = decodeBase64url(thumbprint, 32);
+  if (!decoded.ok || decoded.bytes.length !== 32) {
+    return { ok: false, reason: 'digest_not_base64url' };
+  }
+
+  return { ok: true, thumbprint };
+}
+
 const EC_BYTES: Readonly<Record<string, number>> = Object.freeze({
   'P-256': 32,
   'P-384': 48,
