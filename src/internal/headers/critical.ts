@@ -4,6 +4,9 @@
  */
 
 import type { ErrorCategory } from '../../errors/codes.ts';
+import { LIMITS_V1, type Limits } from '../../policy/limits.ts';
+import { utf8Length } from '../encoding/utf8.ts';
+import type { MergedHeader } from './types.ts';
 
 export interface HeaderRejection {
   readonly ok: false;
@@ -12,6 +15,12 @@ export interface HeaderRejection {
 }
 
 export type HeaderCheck = { readonly ok: true } | HeaderRejection;
+
+const OK: HeaderCheck = { ok: true };
+
+function reject(category: ErrorCategory, reason: string): HeaderRejection {
+  return { ok: false, category, reason };
+}
 
 /**
  * Recognized parameters whose JSON type is fixed regardless of whether policy
@@ -98,4 +107,92 @@ const IMPLEMENTED_CRITICAL_EXTENSIONS: Readonly<Record<JoseContext, ReadonlySet<
  */
 export function isBaseParameter(name: string, context: JoseContext): boolean {
   return BASE_PARAMETER_NAMES[context].has(name);
+}
+
+/** A header member value a caller may supply at creation. */
+export type SuppliedHeaderValue = string | boolean | string[] | undefined;
+
+/**
+ * Checks a caller-supplied header member against the fixed JSON type of the
+ * parameter it names.
+ *
+ * A producer must not emit what its corresponding consumer refuses, so the same
+ * recognized-parameter types apply in both directions. Unrecognized names carry
+ * no fixed type and pass through.
+ */
+export function checkSuppliedParameterType(name: string, value: SuppliedHeaderValue): boolean {
+  if (name === 'crit') {
+    return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+  }
+  if (name === 'x5c') {
+    return Array.isArray(value) && value.length > 0 && value.every((entry) => validCertificateEncoding(entry));
+  }
+  if (name === 'b64') {
+    return typeof value === 'boolean';
+  }
+  return !STRING_PARAMETER_NAMES.has(name) || typeof value === 'string';
+}
+
+const STRING_PARAMETER_NAMES: ReadonlySet<string> = new Set<string>(STRING_PARAMETERS);
+
+export function validateParameterTypes(header: MergedHeader, limits: Limits = LIMITS_V1): HeaderCheck {
+  for (const name of STRING_PARAMETERS) {
+    const parameter = header.parameters.get(name);
+    if (parameter === undefined) {
+      continue;
+    }
+    if (parameter.value.kind !== 'string') {
+      return reject('invalid_header', 'parameter_not_a_string');
+    }
+  }
+
+  for (const name of OBJECT_PARAMETERS) {
+    const parameter = header.parameters.get(name);
+    if (parameter === undefined) {
+      continue;
+    }
+    if (parameter.value.kind !== 'object') {
+      return reject('invalid_header', 'parameter_not_an_object');
+    }
+  }
+
+  const x5c = header.parameters.get('x5c');
+  if (x5c !== undefined) {
+    if (x5c.value.kind !== 'array' || x5c.value.elements.length === 0) {
+      return reject('invalid_header', 'x5c_not_a_nonempty_array');
+    }
+    for (const certificate of x5c.value.elements) {
+      if (certificate.kind !== 'string' || !validCertificateEncoding(certificate.value, limits)) {
+        return reject('invalid_header', 'x5c_entry_invalid');
+      }
+    }
+  }
+
+  const p2c = header.parameters.get('p2c');
+  if (p2c !== undefined && p2c.value.kind !== 'number') {
+    return reject('invalid_header', 'p2c_not_a_number');
+  }
+
+  const kid = header.parameters.get('kid');
+  if (kid !== undefined && kid.value.kind === 'string') {
+    // A key identifier is opaque bounded data, never a path or query. Its size
+    // is checked before it is ever used to narrow a key namespace, so an
+    // oversized attacker-supplied value cannot reach a lookup.
+    if (utf8Length(kid.value.value) > limits.kid) {
+      return reject('resource_limit', 'kid_too_long');
+    }
+  }
+
+  return OK;
+}
+
+function validCertificateEncoding(value: string, limits: Limits = LIMITS_V1): boolean {
+  if (value.length === 0 || value.length > Math.ceil((limits.derCertificate * 4) / 3) + 2) {
+    return false;
+  }
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+    return false;
+  }
+  const bytes = Buffer.from(value, 'base64');
+  return bytes.length > 0 && bytes.length <= limits.derCertificate && bytes.toString('base64') === value;
 }
