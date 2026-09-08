@@ -175,3 +175,33 @@ function validCertificate(value: string, limits: Limits): boolean {
   const bytes = Buffer.from(value, 'base64');
   return bytes.length > 0 && bytes.length <= limits.derCertificate && bytes.toString('base64') === value;
 }
+
+/**
+ * Checks metadata against the algorithm and operation that trusted
+ * configuration has bound to this key.
+ *
+ * A mismatch here is `incompatible_key` rather than `invalid_key`: the key
+ * itself is well formed, it simply does not satisfy the binding it is being
+ * used under.
+ */
+export function checkBinding(
+  metadata: KeyMetadata,
+  boundAlgorithm: string,
+  operation: KeyOperation,
+): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
+  // A supplied `alg` must match the configured binding exactly. Its absence
+  // grants no permission; the binding alone decides.
+  if (metadata.alg !== undefined && metadata.alg !== boundAlgorithm) {
+    return { ok: false, reason: 'alg_binding_mismatch' };
+  }
+
+  if (metadata.keyOps !== undefined && !metadata.keyOps.has(operation)) {
+    return { ok: false, reason: 'operation_not_permitted' };
+  }
+
+  if (metadata.use !== undefined && !OPERATIONS_BY_USE[metadata.use].has(operation)) {
+    return { ok: false, reason: 'use_not_compatible' };
+  }
+
+  return { ok: true };
+}
