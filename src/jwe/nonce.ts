@@ -14,6 +14,8 @@
  * type while silently breaking the guarantee the type exists to express.
  */
 
+import type { ErrorCategory } from '../errors/codes.ts';
+
 /**
  * Number of encryptions permitted under one AES key.
  *
@@ -81,4 +83,36 @@ export type NonceResult =
  */
 export interface NonceAllocator {
   reserve(keyIdentity: string): Promise<NonceResult>;
+}
+
+/**
+ * Builds a 96-bit nonce from a provisioned writer identifier and that writer's
+ * own monotonic counter.
+ *
+ * Splitting the space this way is what lets independent writers allocate
+ * without coordinating on every message: uniqueness follows from the writer
+ * identifiers being distinct and each counter never repeating. Writer
+ * identifiers must be provisioned rather than drawn at random, since random
+ * 32-bit values collide often enough to be a real risk at fleet scale.
+ */
+export function composeNonce(writerId: number, counter: bigint): Uint8Array | undefined {
+  if (!Number.isInteger(writerId) || writerId < 0 || writerId > 0xffff_ffff) {
+    return undefined;
+  }
+  if (counter < 0n || counter > 0xffff_ffff_ffff_ffffn) {
+    return undefined;
+  }
+
+  const nonce = new Uint8Array(GCM_NONCE_BYTES);
+  const view = new DataView(nonce.buffer);
+  view.setUint32(0, writerId);
+  view.setBigUint64(4, counter);
+  return nonce;
+}
+
+export function nonceFailureCategory(failure: NonceFailure): ErrorCategory {
+  // Exhaustion and uncertainty are both operator-actionable state problems
+  // rather than transient faults, but none of the three may ever be retried
+  // into a successful encryption.
+  return failure === 'unavailable' ? 'backend_failure' : 'policy_violation';
 }
