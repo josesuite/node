@@ -113,6 +113,33 @@ function fail(
 }
 
 /**
+ * Copies the caller-owned configuration this operation decides on.
+ *
+ * The aggregate predicate and the candidate signers are read after provider
+ * awaits, so retaining the caller's objects would let the configuration change
+ * between the checks at entry and the decision at the end. Keys themselves are
+ * already immutable once imported and are referenced as-is.
+ */
+function snapshotOptions(options: JsonVerifyOptions): JsonVerifyOptions {
+  return {
+    ...options,
+    aggregate: snapshotAggregate(options.aggregate),
+    signers: options.signers.map((signer) => ({ principalId: signer.principalId, key: signer.key })),
+  };
+}
+
+function snapshotAggregate(policy: AggregatePolicy): AggregatePolicy {
+  switch (policy.kind) {
+    case 'named':
+      return { kind: 'named', principalId: policy.principalId };
+    case 'all':
+      return { kind: 'all', required: new Set(policy.required) };
+    case 'threshold':
+      return { kind: 'threshold', eligible: new Set(policy.eligible), threshold: policy.threshold };
+  }
+}
+
+/**
  * These are the same invariants a published key snapshot must satisfy. They are
  * checked here because this API accepts a signer list directly, which would
  * otherwise be a way to reach verification with a configuration the snapshot
@@ -158,16 +185,22 @@ function validateSignerConfiguration(options: JsonVerifyOptions): JsonVerifyFail
   return undefined;
 }
 
-export async function verifyJson(source: Uint8Array, options: JsonVerifyOptions): Promise<JsonVerifyResult> {
+export async function verifyJson(source: Uint8Array, callerOptions: JsonVerifyOptions): Promise<JsonVerifyResult> {
   // The signer collection is trusted configuration, so it is validated as a
   // whole before the token is looked at. The aggregate predicate counts
   // distinct principals; without these invariants one key bound to two
   // principals, or two HMAC secrets sharing an authentication capability,
   // would let a single signer satisfy a policy demanding several.
-  const limitDefect = checkLimits(options.limits);
+  const limitDefect = checkLimits(callerOptions.limits);
   if (limitDefect !== undefined) {
     return fail('configuration', 'policy_violation', limitDefect);
   }
+
+  // The configuration stays caller-owned and is read across every provider
+  // await, so it is snapshotted before validation. Without this the predicate
+  // and candidate set validated at entry need not be the ones the aggregate
+  // decision is taken under.
+  const options = snapshotOptions(callerOptions);
 
   const signers = validateSignerConfiguration(options);
   if (signers !== undefined) {
