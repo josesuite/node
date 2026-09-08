@@ -12,8 +12,8 @@
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { attempt, importJwk } from '../../internal/crypto/webcrypto.ts';
-import { rsaJwk, type RsaJwkParameters } from './rsa-common.ts';
+import { attempt, attemptVerify, importJwk } from '../../internal/crypto/webcrypto.ts';
+import { rsaJwk, rsaPublicJwk, type RsaJwkParameters } from './rsa-common.ts';
 
 const RSA_HASHES: Readonly<Record<string, string>> = Object.freeze({
   RS256: 'SHA-256',
@@ -37,4 +37,21 @@ export async function signRsaPkcs1(
   });
 
   return result.ok ? backendOk(new Uint8Array(result.value)) : result;
+}
+
+export async function verifyRsaPkcs1(
+  algorithm: string,
+  publicJwk: RsaJwkParameters,
+  signingInput: Uint8Array,
+  signature: Uint8Array,
+): Promise<BackendResult<boolean>> {
+  const hash = RSA_HASHES[algorithm];
+  if (hash === undefined) {
+    return backendError('unsupported');
+  }
+
+  return attemptVerify(async () => {
+    const key = await importJwk(rsaPublicJwk(publicJwk), { name: 'RSASSA-PKCS1-v1_5', hash }, ['verify']);
+    return crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, toBufferSource(signature), toBufferSource(signingInput));
+  });
 }
