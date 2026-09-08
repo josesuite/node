@@ -183,8 +183,17 @@ function verifyNative(
     return backendError('unsupported');
   }
 
+  // Constructing the key is an operational step. Only the verification itself
+  // has a cryptographic outcome, so an unusable key is reported as a backend
+  // failure rather than as a signature that did not verify.
+  let key;
   try {
-    const key = createPublicKey({ key: jwk, format: 'jwk' });
+    key = createPublicKey({ key: jwk, format: 'jwk' });
+  } catch {
+    return backendError('operation_failed');
+  }
+
+  try {
     return backendOk(nodeVerify(hash, signingInput, { key, dsaEncoding: 'ieee-p1363' }, signature));
   } catch {
     // A provider rejection here is a failed verification, never an error that
