@@ -94,3 +94,62 @@ export async function sealGcm(
     tag: combined.subarray(plaintext.length),
   });
 }
+
+/**
+ * Authenticates and decrypts, returning plaintext only when the tag verifies.
+ *
+ * A failed tag is reported as `undefined` rather than as a backend failure: it
+ * is an authentication outcome, and collapsing it into a provider error would
+ * let a real outage be read as a forgery, or the reverse. No plaintext is
+ * produced on that path, so nothing provisional can escape to a caller.
+ */
+export async function openGcm(
+  algorithm: string,
+  key: Uint8Array,
+  iv: Uint8Array,
+  ciphertext: Uint8Array,
+  tag: Uint8Array,
+  additionalData: Uint8Array,
+): Promise<BackendResult<Uint8Array | undefined>> {
+  const parameters = gcmParameters(algorithm);
+  if (parameters === undefined) {
+    return backendError('unsupported');
+  }
+  if (key.length !== parameters.keyBytes) {
+    return backendError('operation_failed');
+  }
+  // Nonce and tag widths are public and fixed; a wrong width is a malformed
+  // object, not a decryption attempt worth making.
+  if (iv.length !== GCM_IV_BYTES || tag.length !== GCM_TAG_BYTES) {
+    return backendOk(undefined);
+  }
+
+  const combined = new Uint8Array(ciphertext.length + tag.length);
+  combined.set(ciphertext);
+  combined.set(tag, ciphertext.length);
+
+  const imported = await attempt(() =>
+    importRaw(key, { name: 'AES-GCM', length: parameters.keyBytes * 8 }, ['decrypt']),
+  );
+  if (!imported.ok) {
+    return imported;
+  }
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      {
+        name: 'AES-GCM',
+        iv: toBufferSource(iv),
+        additionalData: toBufferSource(additionalData),
+        tagLength: GCM_TAG_BYTES * 8,
+      },
+      imported.value,
+      toBufferSource(combined),
+    );
+
+    return backendOk(new Uint8Array(plaintext));
+  } catch {
+    // The provider rejects the whole operation when the tag does not verify, so
+    // no partial plaintext is ever produced here.
+    return backendOk(undefined);
+  }
+}
