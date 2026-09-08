@@ -102,3 +102,27 @@ export function decodeBase64url(input: string, maxDecodedBytes: number): Base64u
 
   return { ok: true, bytes: output };
 }
+
+export function encodeBase64url(bytes: Uint8Array): string {
+  let output = '';
+  let accumulator = 0;
+  let bitsHeld = 0;
+
+  for (const byte of bytes) {
+    accumulator = (accumulator << 8) | byte;
+    bitsHeld += 8;
+
+    while (bitsHeld >= 6) {
+      bitsHeld -= 6;
+      output += ALPHABET[(accumulator >>> bitsHeld) & 0x3f];
+    }
+  }
+
+  if (bitsHeld > 0) {
+    // Remaining bits are left-aligned into a final character, leaving the
+    // unused low-order bits zero as canonical decoding requires.
+    output += ALPHABET[(accumulator << (6 - bitsHeld)) & 0x3f];
+  }
+
+  return output;
+}
