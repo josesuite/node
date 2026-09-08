@@ -3,7 +3,7 @@
  */
 
 import type { ErrorCategory } from '../../errors/codes.ts';
-import type { JsonObject } from '../json/types.ts';
+import { isJsonObject, type JsonObject, type JsonValue } from '../json/types.ts';
 import { type HeaderOrigin, type HeaderParameter, type MergedHeader } from './types.ts';
 
 export interface HeaderSource {
@@ -62,4 +62,22 @@ export function mergeHeaders(sources: readonly HeaderSource[], budget: HeaderBud
   }
 
   return { ok: true, header: { parameters, sourceBytes } };
+}
+
+/**
+ * Validates that a decoded header component is a JSON object.
+ *
+ * Container types are strict: an array, string, or number in a header position
+ * is rejected rather than coerced, because a coerced value would be read as
+ * having members it does not have.
+ */
+export function requireHeaderObject(
+  value: JsonValue,
+):
+  | { readonly ok: true; readonly object: JsonObject }
+  | { readonly ok: false; readonly category: ErrorCategory; readonly reason: string } {
+  if (!isJsonObject(value)) {
+    return { ok: false, category: 'invalid_header', reason: 'header_not_an_object' };
+  }
+  return { ok: true, object: value };
 }
