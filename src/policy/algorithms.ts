@@ -19,6 +19,7 @@ import {
   lookupAlgorithm,
 } from '../algorithms/registry.ts';
 import type { ErrorCategory } from '../errors/codes.ts';
+import { LIMITS_V1 } from './limits.ts';
 
 export type AlgorithmDecision =
   | { readonly ok: true; readonly descriptor: AlgorithmDescriptor }
@@ -99,4 +100,51 @@ export class AlgorithmPolicy {
   identifiers(): readonly string[] {
     return [...this.permitted].toSorted();
   }
+}
+
+/**
+ * Classifies a received identifier against this policy.
+ *
+ * This decides one identifier in isolation. For an object with several
+ * signatures or recipients, callers must additionally sweep every entry for
+ * prohibited identifiers before evaluating any of them, because a prohibited
+ * identifier must reject the whole object rather than just its own entry. This
+ * function reports that disposition but cannot enforce that scope by itself.
+ */
+export function decideAlgorithm(policy: AlgorithmPolicy, identifier: string): AlgorithmDecision {
+  // A bounded length check precedes lookup so an oversized attacker-supplied
+  // string is rejected as a resource defect rather than becoming a map probe.
+  if (identifier.length > LIMITS_V1.algorithmName) {
+    return { ok: false, category: 'resource_limit', reason: 'algorithm_name_too_long' };
+  }
+
+  const descriptor = lookupAlgorithm(identifier, policy.use);
+
+  if (descriptor?.category === 'prohibited') {
+    return { ok: false, category: 'prohibited_algorithm', reason: 'prohibited_algorithm' };
+  }
+
+  // No implemented capability in this context. Rows marked unspecified are
+  // registered elsewhere but undefined here, which is observably the same.
+  if (descriptor === undefined || descriptor.category === 'unspecified') {
+    return { ok: false, category: 'unsupported_algorithm', reason: 'unsupported_algorithm' };
+  }
+
+  // The capability exists but the caller did not permit it.
+  if (!policy.has(identifier)) {
+    return { ok: false, category: 'policy_violation', reason: 'algorithm_not_allowed' };
+  }
+
+  // Direction is checked at every dispatch, not only where the allowlist was
+  // built. A policy constructed for one direction and passed to an operation
+  // running in the other would otherwise permit exactly what its own
+  // construction refused.
+  if (policy.operation === 'create' && !descriptor.canCreate) {
+    return { ok: false, category: 'policy_violation', reason: 'algorithm_receive_only' };
+  }
+  if (policy.operation === 'receive' && !descriptor.canReceive) {
+    return { ok: false, category: 'policy_violation', reason: 'algorithm_not_acceptable' };
+  }
+
+  return { ok: true, descriptor };
 }
