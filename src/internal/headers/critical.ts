@@ -124,12 +124,21 @@ export type SuppliedHeaderValue = string | boolean | string[] | undefined;
  * recognized-parameter types apply in both directions. Unrecognized names carry
  * no fixed type and pass through.
  */
-export function checkSuppliedParameterType(name: string, value: SuppliedHeaderValue): boolean {
+export function checkSuppliedParameterType(
+  name: string,
+  value: SuppliedHeaderValue,
+  limits: Limits = LIMITS_V1,
+): boolean {
   if (name === 'crit') {
     return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
   }
   if (name === 'x5c') {
-    return Array.isArray(value) && value.length > 0 && value.every((entry) => validCertificateEncoding(entry));
+    return (
+      Array.isArray(value) &&
+      value.length > 0 &&
+      value.length <= limits.certificateChain &&
+      value.every((entry) => validCertificateEncoding(entry, limits))
+    );
   }
   if (name === 'b64') {
     return typeof value === 'boolean';
@@ -164,6 +173,13 @@ export function validateParameterTypes(header: MergedHeader, limits: Limits = LI
   if (x5c !== undefined) {
     if (x5c.value.kind !== 'array' || x5c.value.elements.length === 0) {
       return reject('invalid_header', 'x5c_not_a_nonempty_array');
+    }
+    // The bound applies even though the chain is an ignored hint here: the array
+    // is attacker-supplied and is counted before its entries are decoded, so an
+    // unbounded chain cannot impose work regardless of whether trust is
+    // evaluated from it.
+    if (x5c.value.elements.length > limits.certificateChain) {
+      return reject('resource_limit', 'x5c_chain_too_long');
     }
     for (const certificate of x5c.value.elements) {
       if (certificate.kind !== 'string' || !validCertificateEncoding(certificate.value, limits)) {
