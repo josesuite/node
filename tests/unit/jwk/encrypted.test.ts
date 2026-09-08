@@ -107,4 +107,65 @@ describe('encrypted key containers', () => {
       expect(result.category).toBe('token_type_mismatch');
     }
   });
+
+  test('clears the decrypted document when the content type is rejected', async () => {
+    // The plaintext is an owned decrypted private-key document. A content-type
+    // rejection is still a post-decryption exit, so it must not leave that
+    // document in memory.
+    const wrapping = wrappingKeys();
+    const secret = JSON.stringify({ kty: 'oct', k: Buffer.alloc(32, 7).toString('base64url') });
+    const encrypted = await encryptCompact(new TextEncoder().encode(secret), {
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'create'),
+      contentAlgorithm: 'A128GCM',
+      recipients: [{ key: wrapping.encryption }],
+      // Omitted `cty` is rejected unless the caller bound the type externally.
+      random: systemRandom,
+      nonceAllocator: allocator(),
+      limits: LIMITS_V1,
+    });
+    if (!encrypted.ok) {
+      throw new Error(encrypted.reason);
+    }
+
+    const cleared: boolean[] = [];
+    const fill = Uint8Array.prototype.fill;
+    // The plaintext is allocated inside decryption and never surfaces on a
+    // rejection, so the clearing is observed at the prototype. Recording the
+    // buffer's state at the moment it is zeroed is what distinguishes clearing
+    // the real document from zeroing something already empty.
+    // oxlint-disable-next-line no-extend-native
+    Uint8Array.prototype.fill = function (this: Uint8Array, ...args: Parameters<typeof fill>) {
+      if (args[0] === 0 && this.length === secret.length) {
+        cleared.push(this.some((byte) => byte !== 0));
+      }
+      return fill.apply(this, args) as Uint8Array;
+    };
+
+    try {
+      const result = await decryptKeyContainer(encrypted.token, {
+        type: 'jwk+json',
+        limits: LIMITS_V1,
+        decryption: {
+          keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'receive'),
+          contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'receive'),
+          recipients: [{ principalId: 'recipient', key: wrapping.decryption }],
+          principalId: 'recipient',
+        },
+        jwk: { namespace: 'keys', principalId: 'issuer', import: { algorithm: 'HS256', operation: 'verify' } },
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe('key_container_cty_required');
+      }
+    } finally {
+      // oxlint-disable-next-line no-extend-native
+      Uint8Array.prototype.fill = fill;
+    }
+
+    // The document was populated when it was cleared, proving the clearing ran
+    // on the real plaintext and not on an already-empty buffer.
+    expect(cleared).toContain(true);
+  });
 });
