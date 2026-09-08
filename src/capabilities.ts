@@ -15,6 +15,19 @@ export interface DirectionalAlgorithms {
   readonly receive: readonly string[];
 }
 
+/**
+ * A capability the specification requires that this build cannot offer.
+ *
+ * Reported explicitly rather than by omission: a caller comparing the report
+ * against the required suite must be able to see that the gap is known, rather
+ * than inferring it from an absence that could equally mean an oversight.
+ */
+export interface CapabilityGap {
+  readonly identifier: string;
+  readonly use: AlgorithmUse;
+  readonly reason: string;
+}
+
 export interface CapabilityReport {
   readonly specificationVersion: '1.0.11';
   readonly algorithms: Readonly<Record<AlgorithmUse, DirectionalAlgorithms>>;
@@ -27,6 +40,10 @@ export interface CapabilityReport {
     readonly providers: readonly string[];
     readonly restrictions: readonly string[];
   };
+  /** Empty only when every required capability is available. */
+  readonly requiredCapabilityGaps: readonly CapabilityGap[];
+  /** False while any required capability is missing. */
+  readonly fullSuiteConformant: boolean;
   readonly limits: Readonly<Limits>;
 }
 
@@ -43,7 +60,27 @@ function algorithms(use: AlgorithmUse): DirectionalAlgorithms {
   });
 }
 
+/**
+ * Required algorithms withheld for want of a qualified backend.
+ *
+ * Derived from the registry rather than listed by hand, so an algorithm cannot
+ * be qualified or de-qualified without the reported conformance status moving
+ * with it.
+ */
+function requiredCapabilityGaps(): readonly CapabilityGap[] {
+  const gaps: CapabilityGap[] = [];
+  for (const use of ['jws', 'jwe_alg', 'jwe_enc'] as const) {
+    for (const entry of implementedAlgorithms(use)) {
+      if (entry.category === 'required' && !isQualifiedAlgorithm(entry.identifier)) {
+        gaps.push(Object.freeze({ identifier: entry.identifier, use, reason: 'no_qualified_backend' }));
+      }
+    }
+  }
+  return Object.freeze(gaps);
+}
+
 export function getCapabilityReport(limits: Limits = LIMITS_V1): CapabilityReport {
+  const gaps = requiredCapabilityGaps();
   return Object.freeze({
     specificationVersion: '1.0.11',
     algorithms: Object.freeze({
@@ -72,6 +109,8 @@ export function getCapabilityReport(limits: Limits = LIMITS_V1): CapabilityRepor
         'Ed25519, Ed448, compression, and post-quantum algorithms are unqualified',
       ]),
     }),
+    requiredCapabilityGaps: gaps,
+    fullSuiteConformant: gaps.length === 0,
     limits: Object.freeze({ ...limits }),
   });
 }
