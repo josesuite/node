@@ -140,8 +140,13 @@ const PRIVATE_MEMBERS = new Set(['d', 'p', 'q', 'dp', 'dq', 'qi', 'oth', 'priv']
  */
 function isPrivateOrSymmetric(value: JsonObject): boolean {
   const keyType = value.members.get('kty');
-  return (
-    (keyType?.kind === 'string' && keyType.value === 'oct') ||
-    [...PRIVATE_MEMBERS].some((name) => value.members.has(name))
-  );
+  if (keyType?.kind === 'string' && keyType.value === 'oct') {
+    return true;
+  }
+  for (const name of PRIVATE_MEMBERS) {
+    if (value.members.has(name)) {
+      return true;
+    }
+  }
+  return false;
 }
