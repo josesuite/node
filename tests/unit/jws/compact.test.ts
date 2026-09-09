@@ -187,6 +187,30 @@ describe('round trips', () => {
   });
 });
 
+describe('project-owned fixtures', () => {
+  test('verifies an independently serialized HMAC JWS', async () => {
+    const verification = key(
+      {
+        kty: 'oct',
+        k: 'cHJvamVjdC1vd25lZC1obWFjLWZpeHR1cmUta2V5LTMyYnl0ZXMhIQ',
+      },
+      'HS256',
+      'verify',
+    );
+    const token = [
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6InByb2plY3QrandzIn0',
+      'eyJpc3MiOiJpbnRlcm5hbCIsInN1YiI6ImFsaWNlIiwiYWRtaW4iOnRydWV9',
+      'nL-Ov1o8Avp4Uc4Riwv45TsV8CMK5YyKzM98PU4365o',
+    ].join('.');
+
+    const result = await verifyWith(token, verification, 'HS256');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(new TextDecoder().decode(result.payload)).toBe('{"iss":"internal","sub":"alice","admin":true}');
+    }
+  });
+});
+
 describe('tampering is detected', () => {
   test('a modified payload fails verification', async () => {
     const { signing, verification } = ecPair();
