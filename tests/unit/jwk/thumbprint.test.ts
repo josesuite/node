@@ -26,6 +26,27 @@ function thumbprint(key: UsableKey): string {
 }
 
 describe('JWK thumbprints', () => {
+  test('matches the project-owned EC thumbprint fixture', () => {
+    const jwk = {
+      crv: 'P-256',
+      kty: 'EC',
+      x: 'TXjWYQ1z2Ilp5N1_9jwxjL5JEuoQQA7uXVCK2W-rcXY',
+      y: '_Bu3lmQ-2g3DHHI3ZFRc9q_r8o3eczxG28BXpOyfG_Y',
+    };
+    const result = importKeyBytes(new TextEncoder().encode(JSON.stringify(jwk)), {
+      algorithm: 'ES256',
+      operation: 'verify',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(computeThumbprint(result.key)).toEqual({
+        ok: true,
+        thumbprint: '99-b758gQbn1jNcqVGqkjMvv8Oz0cnsxKoA1QF1EG9M',
+      });
+    }
+  });
+
   test('hashes the validated canonical public projection', () => {
     const privateJwk = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'jwk' });
     const { d: _d, ...publicJwk } = privateJwk;
