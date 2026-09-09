@@ -9,6 +9,7 @@ import { signJson } from '../../../src/jws/sign-json.ts';
 import { type TrustedSigner, verifyJson } from '../../../src/jws/verify-json.ts';
 import { AlgorithmPolicy } from '../../../src/policy/algorithms.ts';
 import { LIMITS_V1, lowerLimits } from '../../../src/policy/limits.ts';
+import { flipBit } from '../../helpers/runtime.ts';
 
 function object(value: Record<string, unknown>): JsonObject {
   const result = parseJson(new TextEncoder().encode(JSON.stringify(value)), LIMITS_V1);
@@ -226,8 +227,7 @@ describe('failed entries do not erase successes', () => {
 
     // Append a second entry for the same signer whose signature is corrupt.
     const broken = { ...parsed.signatures[0] };
-    const bytes = Buffer.from(broken.signature, 'base64url');
-    bytes[0] ^= 0xff;
+    const bytes = Buffer.from(flipBit(Buffer.from(broken.signature, 'base64url'), 0, 0xff));
     broken.signature = bytes.toString('base64url');
     parsed.signatures.push(broken);
 
@@ -249,8 +249,7 @@ describe('failed entries do not erase successes', () => {
     const parsed = JSON.parse(serialized);
 
     // Corrupt the first entry; the second must still be evaluated.
-    const bytes = Buffer.from(parsed.signatures[0].signature, 'base64url');
-    bytes[0] ^= 0xff;
+    const bytes = Buffer.from(flipBit(Buffer.from(parsed.signatures[0].signature, 'base64url'), 0, 0xff));
     parsed.signatures[0].signature = bytes.toString('base64url');
 
     const result = await verify(JSON.stringify(parsed), trust(alice, bob), namedSigner('bob'));

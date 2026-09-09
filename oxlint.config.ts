@@ -32,5 +32,13 @@ export default defineConfig({
     // Custom rules
     curly: ['error', 'all'],
   },
+  overrides: [
+    {
+      files: ['tests/**/*.test.ts'],
+      rules: {
+        'no-await-in-loop': 'off',
+      },
+    },
+  ],
   ignorePatterns: ['dist/**', 'node_modules/**'],
 });

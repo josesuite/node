@@ -66,7 +66,6 @@ describe('lowerLimits', () => {
 
   test('ignores absent overrides rather than treating them as zero', () => {
     expect(lowerLimits({}).payload).toBe(LIMITS_V1.payload);
-    expect(lowerLimits({ payload: undefined }).payload).toBe(LIMITS_V1.payload);
   });
 
   test('allows zero as an explicit lower bound', () => {

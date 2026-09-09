@@ -28,7 +28,7 @@ function object(value: Record<string, unknown>): JsonObject {
 function key(
   jwk: Record<string, unknown>,
   algorithm: string,
-  operation: 'wrapKey' | 'unwrapKey' | 'deriveKey',
+  operation: 'decrypt' | 'wrapKey' | 'unwrapKey' | 'deriveKey',
 ): UsableKey {
   const boundOperation = algorithm.startsWith('ECDH-ES') ? 'deriveKey' : operation;
   const result = importKey(object(jwk), {

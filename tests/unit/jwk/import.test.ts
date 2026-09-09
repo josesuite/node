@@ -419,7 +419,21 @@ describe('imported keys are sealed', () => {
       // Ordinary serialization and printing are how private material reaches
       // logs and error reports, so neither may carry it. The private scalar's
       // own bytes are searched for, not just the property name.
-      const secret = [...(result.key.keyType === 'oct' ? result.key.material : result.key.material.d!)].join(', ');
+      let secretBytes: Uint8Array;
+      if (result.key.keyType === 'oct' || result.key.keyType === 'AKP') {
+        secretBytes = result.key.material;
+      } else if (result.key.keyType === 'RSA') {
+        if (!('d' in result.key.material)) {
+          throw new Error('private key material missing');
+        }
+        secretBytes = result.key.material.d;
+      } else {
+        if (result.key.material.d === undefined) {
+          throw new Error('private key material missing');
+        }
+        secretBytes = result.key.material.d;
+      }
+      const secret = [...secretBytes].join(', ');
       for (const rendered of [JSON.stringify(result.key), Bun.inspect(result.key)]) {
         expect(rendered).not.toContain('material');
         expect(rendered).not.toContain(secret);

@@ -18,8 +18,9 @@
     "url": "git+https://github.com/josesuite/node.git"
   },
   "type": "module",
+  "sideEffects": false,
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "oxfmt --check",
@@ -29,12 +30,14 @@
     "test:coverage": "bun test --coverage-reporter=lcov"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.1",
-    "oxfmt": "^0.66.0",
-    "oxlint": "^1.81.0",
+    "@types/bun": "^1.4.2",
+    "@types/node": "^26.5.0",
+    "oxfmt": "^0.67.0",
+    "oxlint": "^1.82.0",
     "typescript": "^7.0.2"
   },
   "engines": {
-    "bun": ">=1.4.2 <2.0.0"
+    "bun": ">=1.4.2 <2.0.0",
+    "node": "^20.20.2"
   }
 }

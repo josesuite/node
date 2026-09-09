@@ -4,6 +4,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonObject } from '../../../src/internal/json/types.ts';
 import { LIMITS_V1 } from '../../../src/policy/limits.ts';
+import type { MaterialRejection } from '../../../src/key/validation.ts';
 import {
   toBigInt,
   validateOctMaterial,
@@ -30,6 +31,12 @@ const RSA_3072 = rsaJwk();
 
 function b64u(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64url');
+}
+
+/** Narrows to the rejection branch so an unexpected success fails here. */
+function rejectionOf(result: { readonly ok: true } | MaterialRejection): MaterialRejection {
+  expect(result.ok).toBe(false);
+  return result as MaterialRejection;
 }
 
 describe('Base64urlUInt encoding', () => {
@@ -164,13 +171,13 @@ describe('RSA private material', () => {
     for (const missing of ['d', 'p', 'q', 'dp', 'dq', 'qi']) {
       const partial = { ...RSA_3072 };
       delete partial[missing];
-      expect(validateRsaPrivate(object(partial), publicMaterial)?.reason).toBe(`${missing}_missing`);
+      expect(rejectionOf(validateRsaPrivate(object(partial), publicMaterial)).reason).toBe(`${missing}_missing`);
     }
   });
 
   test('rejects multi-prime keys', () => {
-    const result = validateRsaPrivate(object({ ...RSA_3072, oth: [] }), publicMaterial);
-    expect(result?.reason).toBe('oth_unsupported');
+    const result = rejectionOf(validateRsaPrivate(object({ ...RSA_3072, oth: [] }), publicMaterial));
+    expect(result.reason).toBe('oth_unsupported');
   });
 
   test('rejects an inconsistent qi that the backend would accept', () => {
@@ -178,40 +185,44 @@ describe('RSA private material', () => {
     // to be caught here or not at all.
     const qi = Buffer.from(RSA_3072['qi']!, 'base64url');
     qi[qi.length - 1] = qi[qi.length - 1]! ^ 0x01;
-    const result = validateRsaPrivate(object({ ...RSA_3072, qi: b64u(qi) }), publicMaterial);
-    expect(result?.reason).toBe('qi_mismatch');
+    const result = rejectionOf(validateRsaPrivate(object({ ...RSA_3072, qi: b64u(qi) }), publicMaterial));
+    expect(result.reason).toBe('qi_mismatch');
   });
 
   test('rejects factors whose product is not the modulus', () => {
     const other = rsaJwk();
-    const result = validateRsaPrivate(object({ ...RSA_3072, p: other['p']! }), publicMaterial);
-    expect(result).toBeDefined();
+    const result = rejectionOf(validateRsaPrivate(object({ ...RSA_3072, p: other['p']! }), publicMaterial));
     // Substituting a foreign prime breaks the product before any CRT check.
-    expect(result?.reason).toBe('pq_product_mismatch');
+    expect(result.reason).toBe('pq_product_mismatch');
   });
 
   test('rejects mismatched CRT exponents', () => {
     const dp = Buffer.from(RSA_3072['dp']!, 'base64url');
     dp[dp.length - 1] = dp[dp.length - 1]! ^ 0x01;
-    expect(validateRsaPrivate(object({ ...RSA_3072, dp: b64u(dp) }), publicMaterial)?.reason).toBe('dp_mismatch');
+    expect(rejectionOf(validateRsaPrivate(object({ ...RSA_3072, dp: b64u(dp) }), publicMaterial)).reason).toBe(
+      'dp_mismatch',
+    );
 
     const dq = Buffer.from(RSA_3072['dq']!, 'base64url');
     dq[dq.length - 1] = dq[dq.length - 1]! ^ 0x01;
-    expect(validateRsaPrivate(object({ ...RSA_3072, dq: b64u(dq) }), publicMaterial)?.reason).toBe('dq_mismatch');
+    expect(rejectionOf(validateRsaPrivate(object({ ...RSA_3072, dq: b64u(dq) }), publicMaterial)).reason).toBe(
+      'dq_mismatch',
+    );
   });
 
   test('rejects a private exponent inconsistent with the public exponent', () => {
     const other = rsaJwk();
     // A foreign `d` of the same size keeps every length valid but breaks the
     // modular relationship with `e`.
-    const result = validateRsaPrivate(object({ ...RSA_3072, d: other['d']! }), publicMaterial);
-    expect(result).toBeDefined();
-    expect(result?.reason).toMatch(/^d_inconsistent_mod_[pq]$|^dp_mismatch$/);
+    const result = rejectionOf(validateRsaPrivate(object({ ...RSA_3072, d: other['d']! }), publicMaterial));
+    expect(result.reason).toMatch(/^d_inconsistent_mod_[pq]$|^dp_mismatch$/);
   });
 
   test('rejects equal primes', () => {
-    const result = validateRsaPrivate(object({ ...RSA_3072, p: RSA_3072['q']!, q: RSA_3072['q']! }), publicMaterial);
-    expect(result?.reason).toBe('p_equals_q');
+    const result = rejectionOf(
+      validateRsaPrivate(object({ ...RSA_3072, p: RSA_3072['q']!, q: RSA_3072['q']! }), publicMaterial),
+    );
+    expect(result.reason).toBe('p_equals_q');
   });
 
   test('rejects a unit factor without dividing by zero', () => {
@@ -219,11 +230,12 @@ describe('RSA private material', () => {
     // `p - 1` moduli. A unit factor must be reported as a normalized rejection
     // rather than throwing a RangeError out of import.
     const forged = { ...RSA_3072, p: b64u(Uint8Array.from([1])), q: RSA_3072['n']! };
-    let result: ReturnType<typeof validateRsaPrivate>;
+    let result: ReturnType<typeof validateRsaPrivate> | undefined;
     expect(() => {
       result = validateRsaPrivate(object(forged), publicMaterial);
     }).not.toThrow();
-    expect(result?.reason).toBe('factor_not_greater_than_one');
+    expect(result).toBeDefined();
+    expect(rejectionOf(result!).reason).toBe('factor_not_greater_than_one');
   });
 });
 
