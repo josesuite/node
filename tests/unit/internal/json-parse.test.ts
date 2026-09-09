@@ -81,6 +81,7 @@ describe('structure', () => {
     const array = parse('[]');
     assert.strictEqual(array.kind, 'array');
     assert.strictEqual(parse('{"a":{"b":[1,true,null]}}').kind, 'object');
+    assert.strictEqual(parse('false').kind, 'boolean');
   });
 
   test('accepts insignificant whitespace between tokens', () => {
@@ -113,7 +114,9 @@ describe('structure', () => {
     assert.strictEqual(failure('{"a"'), 'malformed');
     assert.strictEqual(failure('{"a":}'), 'malformed');
     assert.strictEqual(failure('[1'), 'malformed');
+    assert.strictEqual(failure('[1}'), 'malformed');
     assert.strictEqual(failure('{"a":1]'), 'malformed');
+    assert.strictEqual(failure('{"a":"raw'), 'malformed');
   });
 
   test('rejects a byte-order mark', () => {
@@ -165,6 +168,7 @@ describe('JSON-02 duplicate members', () => {
 describe('strings', () => {
   test('decodes the standard escape sequences', () => {
     assert.strictEqual(stringValue('{"a":"\\"\\\\\\/\\b\\f\\n\\r\\t"}', 'a'), '"\\/\b\f\n\r\t');
+    assert.strictEqual(stringValue('{"a":"\\u00AF"}', 'a'), '¯');
   });
 
   test('decodes a surrogate pair escape into one scalar value', () => {
@@ -184,6 +188,10 @@ describe('strings', () => {
     assert.strictEqual(failure('{"a":"\\u00"}'), 'malformed');
     assert.strictEqual(failure('{"a":"raw\u0001"}'), 'malformed');
     assert.strictEqual(failure('{"a":"raw\nnewline"}'), 'malformed');
+    assert.strictEqual(failure('{"a":"\\'), 'malformed');
+    assert.strictEqual(failure('{"a":"\\u'), 'malformed');
+    assert.strictEqual(failure('{"a":"\\t'), 'malformed');
+    assert.strictEqual(failure('{"a":"\\t\u0001"}'), 'malformed');
   });
 
   test('rejects invalid UTF-8 inside a string', () => {
@@ -222,9 +230,11 @@ describe('LIMIT-02 exact numbers', () => {
   });
 
   test('rejects non-JSON numeric forms', () => {
-    for (const lexeme of ['NaN', 'Infinity', '-Infinity', '+1', '01', '-01', '.5', '1.', '1e', 'Ox1']) {
+    for (const lexeme of ['NaN', 'Infinity', '-Infinity', '+1', '-', '01', '-01', '.5', '1.', '1e', 'Ox1']) {
       assert.strictEqual(failure(`{"a":${lexeme}}`), 'malformed');
     }
+    assert.strictEqual(failure('-'), 'malformed');
+    assert.strictEqual(failure('truX'), 'malformed');
   });
 
   test('bounds the number lexeme and exponent magnitude', () => {
@@ -305,5 +315,19 @@ describe('parse result metadata', () => {
     if (result.ok) {
       assert.strictEqual(result.nodes, 4);
     }
+  });
+
+  test('does not misclassify unexpected failures as malformed input', () => {
+    const unavailable = new Error('budget unavailable');
+    const budget = new Proxy(BUDGET, {
+      get() {
+        throw unavailable;
+      },
+    });
+
+    assert.throws(
+      () => parseJson(bytes('null'), budget),
+      (error) => error === unavailable,
+    );
   });
 });
