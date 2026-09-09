@@ -329,7 +329,7 @@ export function importKey(jwk: JsonObject, options: ImportOptions, limits: Limit
         return reject('curve_not_qualified', 'unsupported_algorithm');
       }
 
-      const result = validateOkpMaterial(jwk, curve, deriveOkpPublicKey, () => 'validator_unavailable');
+      const result = validateOkpMaterial(jwk, curve, deriveOkpPublicKey);
       if (!result.ok) {
         return { ok: false, category: result.category, reason: result.reason };
       }
