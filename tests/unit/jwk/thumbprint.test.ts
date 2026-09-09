@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 
 import { computeThumbprint, parseThumbprintUri, toThumbprintUri } from '../../../src/jwk/thumbprint.ts';
@@ -38,9 +39,9 @@ describe('JWK thumbprints', () => {
       operation: 'verify',
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(computeThumbprint(result.key)).toEqual({
+      assert.deepStrictEqual(computeThumbprint(result.key), {
         ok: true,
         thumbprint: '99-b758gQbn1jNcqVGqkjMvv8Oz0cnsxKoA1QF1EG9M',
       });
@@ -52,31 +53,34 @@ describe('JWK thumbprints', () => {
     const { d: _d, ...publicJwk } = privateJwk;
     const canonical = `{"crv":"${publicJwk.crv}","kty":"EC","x":"${publicJwk.x}","y":"${publicJwk.y}"}`;
 
-    expect(thumbprint(imported(privateJwk))).toBe(thumbprint(imported(publicJwk)));
-    expect(thumbprint(imported(publicJwk))).toBe(createHash('sha256').update(canonical).digest('base64url'));
+    assert.strictEqual(thumbprint(imported(privateJwk)), thumbprint(imported(publicJwk)));
+    assert.strictEqual(thumbprint(imported(publicJwk)), createHash('sha256').update(canonical).digest('base64url'));
   });
 
   test('ignores metadata already excluded from imported identity', () => {
     const jwk = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ format: 'jwk' });
-    expect(thumbprint(imported(jwk))).toBe(thumbprint(imported({ ...jwk, kid: 'renamed', use: 'sig' } as JsonWebKey)));
+    assert.strictEqual(
+      thumbprint(imported(jwk)),
+      thumbprint(imported({ ...jwk, kid: 'renamed', use: 'sig' } as JsonWebKey)),
+    );
   });
 
   test('rejects a caller-assembled key record', () => {
     const forged = { keyType: 'oct', identity: { kty: 'oct', k: new Uint8Array(32) } } as UsableKey;
-    expect(computeThumbprint(forged)).toEqual({ ok: false, reason: 'key_not_imported' });
+    assert.deepStrictEqual(computeThumbprint(forged), { ok: false, reason: 'key_not_imported' });
   });
 
   test('accepts only canonical 32-byte digest URI values', () => {
     const jwk = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ format: 'jwk' });
     const digest = thumbprint(imported(jwk));
     const encoded = toThumbprintUri(digest);
-    expect(encoded.ok).toBe(true);
+    assert.strictEqual(encoded.ok, true);
     if (!encoded.ok || encoded.uri === undefined) {
       throw new Error('expected URI');
     }
-    expect(parseThumbprintUri(encoded.uri)).toEqual({ ok: true, thumbprint: digest });
-    expect(parseThumbprintUri(`${PREFIX}${digest.slice(0, 42)}B`).ok).toBe(false);
-    expect(toThumbprintUri(`${digest.slice(0, 42)}B`).ok).toBe(false);
-    expect(parseThumbprintUri(`${PREFIX}${digest.slice(0, 42)}=`).ok).toBe(false);
+    assert.deepStrictEqual(parseThumbprintUri(encoded.uri), { ok: true, thumbprint: digest });
+    assert.strictEqual(parseThumbprintUri(`${PREFIX}${digest.slice(0, 42)}B`).ok, false);
+    assert.strictEqual(toThumbprintUri(`${digest.slice(0, 42)}B`).ok, false);
+    assert.strictEqual(parseThumbprintUri(`${PREFIX}${digest.slice(0, 42)}=`).ok, false);
   });
 });

@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
 
 import { systemRandom } from '../../../src/internal/crypto/random.ts';
@@ -69,10 +70,10 @@ describe('encrypted key containers', () => {
       },
       jwk: { namespace: 'issuer-keys', principalId: 'issuer', import: { algorithm: 'ES256', operation: 'verify' } },
     });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok && result.type === 'jwk+json') {
-      expect(result.key.algorithm).toBe('ES256');
-      expect(result.principalId).toBe('issuer');
+      assert.strictEqual(result.key.algorithm, 'ES256');
+      assert.strictEqual(result.principalId, 'issuer');
     }
   });
 
@@ -102,9 +103,9 @@ describe('encrypted key containers', () => {
       },
       jwk: { namespace: 'keys', principalId: 'issuer', import: { algorithm: 'ES256', operation: 'verify' } },
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('token_type_mismatch');
+      assert.strictEqual(result.category, 'token_type_mismatch');
     }
   });
 
@@ -155,9 +156,9 @@ describe('encrypted key containers', () => {
         jwk: { namespace: 'keys', principalId: 'issuer', import: { algorithm: 'HS256', operation: 'verify' } },
       });
 
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('key_container_cty_required');
+        assert.strictEqual(result.reason, 'key_container_cty_required');
       }
     } finally {
       // oxlint-disable-next-line no-extend-native
@@ -166,6 +167,6 @@ describe('encrypted key containers', () => {
 
     // The document was populated when it was cleared, proving the clearing ran
     // on the real plaintext and not on an already-empty buffer.
-    expect(cleared).toContain(true);
+    assert.ok(cleared.includes(true));
   });
 });

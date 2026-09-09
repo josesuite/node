@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { createHmac, randomBytes } from 'node:crypto';
 
 import { CBC_IV_BYTES, cbcHmacParameters } from '../../../src/algorithms/content-encryption/aes-cbc-hmac.ts';
@@ -47,10 +48,10 @@ describe('algorithm shapes', () => {
 
     for (const [algorithm, [cek, iv, tag]] of Object.entries(expected)) {
       const shape = contentEncryptionShape(algorithm);
-      expect(shape).toBeDefined();
-      expect(shape!.cekBytes).toBe(cek);
-      expect(shape!.ivBytes).toBe(iv);
-      expect(shape!.tagBytes).toBe(tag);
+      assert.notStrictEqual(shape, undefined);
+      assert.strictEqual(shape!.cekBytes, cek);
+      assert.strictEqual(shape!.ivBytes, iv);
+      assert.strictEqual(shape!.tagBytes, tag);
     }
   });
 
@@ -58,16 +59,16 @@ describe('algorithm shapes', () => {
     // The distinction decides whether creation must hold durable allocation
     // state, so it is asserted rather than left implicit.
     for (const algorithm of GCM) {
-      expect(contentEncryptionShape(algorithm)!.requiresUniqueNonce).toBe(true);
+      assert.strictEqual(contentEncryptionShape(algorithm)!.requiresUniqueNonce, true);
     }
     for (const algorithm of CBC) {
-      expect(contentEncryptionShape(algorithm)!.requiresUniqueNonce).toBe(false);
+      assert.strictEqual(contentEncryptionShape(algorithm)!.requiresUniqueNonce, false);
     }
   });
 
   test('reports nothing for an unknown or signature identifier', () => {
     for (const algorithm of ['A128CBC', 'ES256', 'dir', 'A128GCMKW', '']) {
-      expect(contentEncryptionShape(algorithm)).toBeUndefined();
+      assert.strictEqual(contentEncryptionShape(algorithm), undefined);
     }
   });
 });
@@ -78,9 +79,9 @@ describe('round trips', () => {
       const { cek, iv, ciphertext, tag } = await seal(algorithm);
 
       const opened = await openContent(algorithm, cek, iv, ciphertext, tag, AAD);
-      expect(opened.ok).toBe(true);
+      assert.strictEqual(opened.ok, true);
       if (opened.ok) {
-        expect(opened.value).toEqual(PLAINTEXT);
+        assert.deepStrictEqual(opened.value, PLAINTEXT);
       }
     });
 
@@ -90,15 +91,15 @@ describe('round trips', () => {
       // GCM produces no ciphertext bytes for an empty plaintext; CBC still
       // emits one full padding block.
       if (algorithm.includes('GCM')) {
-        expect(ciphertext.length).toBe(0);
+        assert.strictEqual(ciphertext.length, 0);
       } else {
-        expect(ciphertext.length).toBe(16);
+        assert.strictEqual(ciphertext.length, 16);
       }
 
       const opened = await openContent(algorithm, cek, iv, ciphertext, tag, AAD);
-      expect(opened.ok).toBe(true);
+      assert.strictEqual(opened.ok, true);
       if (opened.ok) {
-        expect(opened.value).toEqual(new Uint8Array(0));
+        assert.deepStrictEqual(opened.value, new Uint8Array(0));
       }
     });
 
@@ -107,15 +108,15 @@ describe('round trips', () => {
       const { cek, iv, ciphertext, tag } = await seal(algorithm, PLAINTEXT, empty);
 
       const opened = await openContent(algorithm, cek, iv, ciphertext, tag, empty);
-      expect(opened.ok).toBe(true);
+      assert.strictEqual(opened.ok, true);
       if (opened.ok) {
-        expect(opened.value).toEqual(PLAINTEXT);
+        assert.deepStrictEqual(opened.value, PLAINTEXT);
       }
     });
 
     test(`${algorithm} produces the exact tag width`, async () => {
       const { tag } = await seal(algorithm);
-      expect(tag.length).toBe(contentEncryptionShape(algorithm)!.tagBytes);
+      assert.strictEqual(tag.length, contentEncryptionShape(algorithm)!.tagBytes);
     });
   }
 });
@@ -129,9 +130,9 @@ describe('authentication failures', () => {
       const opened = await openContent(algorithm, cek, iv, modified, tag, AAD);
       // Authentication failure is a successful outcome carrying no plaintext,
       // never a backend fault: the two must stay distinguishable.
-      expect(opened.ok).toBe(true);
+      assert.strictEqual(opened.ok, true);
       if (opened.ok) {
-        expect(opened.value).toBeUndefined();
+        assert.strictEqual(opened.value, undefined);
       }
     });
 
@@ -140,9 +141,9 @@ describe('authentication failures', () => {
       const modified = flipBit(tag);
 
       const opened = await openContent(algorithm, cek, iv, ciphertext, modified, AAD);
-      expect(opened.ok).toBe(true);
+      assert.strictEqual(opened.ok, true);
       if (opened.ok) {
-        expect(opened.value).toBeUndefined();
+        assert.strictEqual(opened.value, undefined);
       }
     });
 
@@ -153,9 +154,9 @@ describe('authentication failures', () => {
       const modified = new TextEncoder().encode('eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4R0NNIn1');
 
       const opened = await openContent(algorithm, cek, iv, ciphertext, tag, modified);
-      expect(opened.ok).toBe(true);
+      assert.strictEqual(opened.ok, true);
       if (opened.ok) {
-        expect(opened.value).toBeUndefined();
+        assert.strictEqual(opened.value, undefined);
       }
     });
 
@@ -164,9 +165,9 @@ describe('authentication failures', () => {
       const other = new Uint8Array(randomBytes(contentEncryptionShape(algorithm)!.cekBytes));
 
       const opened = await openContent(algorithm, other, iv, ciphertext, tag, AAD);
-      expect(opened.ok).toBe(true);
+      assert.strictEqual(opened.ok, true);
       if (opened.ok) {
-        expect(opened.value).toBeUndefined();
+        assert.strictEqual(opened.value, undefined);
       }
     });
 
@@ -175,9 +176,9 @@ describe('authentication failures', () => {
       const other = new Uint8Array(randomBytes(contentEncryptionShape(algorithm)!.ivBytes));
 
       const opened = await openContent(algorithm, cek, other, ciphertext, tag, AAD);
-      expect(opened.ok).toBe(true);
+      assert.strictEqual(opened.ok, true);
       if (opened.ok) {
-        expect(opened.value).toBeUndefined();
+        assert.strictEqual(opened.value, undefined);
       }
     });
 
@@ -185,9 +186,9 @@ describe('authentication failures', () => {
       const { cek, iv, ciphertext, tag } = await seal(algorithm);
 
       const opened = await openContent(algorithm, cek, iv, ciphertext, tag.subarray(0, 8), AAD);
-      expect(opened.ok).toBe(true);
+      assert.strictEqual(opened.ok, true);
       if (opened.ok) {
-        expect(opened.value).toBeUndefined();
+        assert.strictEqual(opened.value, undefined);
       }
     });
   }
@@ -201,9 +202,9 @@ describe('size enforcement', () => {
 
       for (const size of [shape.cekBytes - 1, shape.cekBytes + 1, 0]) {
         const result = await sealContent(algorithm, new Uint8Array(size), iv, PLAINTEXT, AAD);
-        expect(result.ok).toBe(false);
+        assert.strictEqual(result.ok, false);
         if (!result.ok) {
-          expect(result.failure).toBe('operation_failed');
+          assert.strictEqual(result.failure, 'operation_failed');
         }
       }
     });
@@ -214,7 +215,7 @@ describe('size enforcement', () => {
 
       for (const size of [shape.ivBytes - 1, shape.ivBytes + 1]) {
         const result = await sealContent(algorithm, cek, new Uint8Array(size), PLAINTEXT, AAD);
-        expect(result.ok).toBe(false);
+        assert.strictEqual(result.ok, false);
       }
     });
 
@@ -225,9 +226,9 @@ describe('size enforcement', () => {
       const shape = contentEncryptionShape(algorithm)!;
 
       const result = await openContent(algorithm, new Uint8Array(shape.cekBytes - 1), iv, ciphertext, tag, AAD);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.failure).toBe('operation_failed');
+        assert.strictEqual(result.failure, 'operation_failed');
       }
     });
   }
@@ -235,15 +236,15 @@ describe('size enforcement', () => {
   test('reports an unsupported identifier rather than failing to authenticate', async () => {
     const key = new Uint8Array(32);
     const sealed = await sealContent('A128CBC', key, new Uint8Array(16), PLAINTEXT, AAD);
-    expect(sealed.ok).toBe(false);
+    assert.strictEqual(sealed.ok, false);
     if (!sealed.ok) {
-      expect(sealed.failure).toBe('unsupported');
+      assert.strictEqual(sealed.failure, 'unsupported');
     }
 
     const opened = await openContent('A128CBC', key, new Uint8Array(16), new Uint8Array(16), new Uint8Array(16), AAD);
-    expect(opened.ok).toBe(false);
+    assert.strictEqual(opened.ok, false);
     if (!opened.ok) {
-      expect(opened.failure).toBe('unsupported');
+      assert.strictEqual(opened.failure, 'unsupported');
     }
   });
 });
@@ -267,7 +268,7 @@ describe('CBC-HMAC construction detail', () => {
     mac.update(ciphertext);
     mac.update(lengthBlock);
 
-    expect(tag).toEqual(new Uint8Array(mac.digest().subarray(0, parameters.tagBytes)));
+    assert.deepStrictEqual(tag, new Uint8Array(mac.digest().subarray(0, parameters.tagBytes)));
   });
 
   test('uses the MAC half first and the AES half second', async () => {
@@ -285,7 +286,7 @@ describe('CBC-HMAC construction detail', () => {
     new DataView(lengthBlock.buffer).setBigUint64(0, BigInt(AAD.length) * 8n);
     mac.update(lengthBlock);
 
-    expect(tag).not.toEqual(new Uint8Array(mac.digest().subarray(0, 16)));
+    assert.notDeepStrictEqual(tag, new Uint8Array(mac.digest().subarray(0, 16)));
   });
 
   test('rejects a ciphertext that is not whole blocks', async () => {
@@ -293,9 +294,9 @@ describe('CBC-HMAC construction detail', () => {
     const { cek, iv, ciphertext, tag } = await seal(algorithm);
 
     const opened = await openContent(algorithm, cek, iv, ciphertext.subarray(0, 15), tag, AAD);
-    expect(opened.ok).toBe(true);
+    assert.strictEqual(opened.ok, true);
     if (opened.ok) {
-      expect(opened.value).toBeUndefined();
+      assert.strictEqual(opened.value, undefined);
     }
   });
 
@@ -306,9 +307,9 @@ describe('CBC-HMAC construction detail', () => {
     const { cek, iv, tag } = await seal(algorithm);
 
     const opened = await openContent(algorithm, cek, iv, new Uint8Array(0), tag, AAD);
-    expect(opened.ok).toBe(true);
+    assert.strictEqual(opened.ok, true);
     if (opened.ok) {
-      expect(opened.value).toBeUndefined();
+      assert.strictEqual(opened.value, undefined);
     }
   });
 
@@ -317,12 +318,12 @@ describe('CBC-HMAC construction detail', () => {
     const aligned = new Uint8Array(32);
     const { cek, iv, ciphertext, tag } = await seal(algorithm, aligned);
 
-    expect(ciphertext.length).toBe(48);
+    assert.strictEqual(ciphertext.length, 48);
 
     const opened = await openContent(algorithm, cek, iv, ciphertext, tag, AAD);
-    expect(opened.ok).toBe(true);
+    assert.strictEqual(opened.ok, true);
     if (opened.ok) {
-      expect(opened.value).toEqual(aligned);
+      assert.deepStrictEqual(opened.value, aligned);
     }
   });
 
@@ -346,18 +347,18 @@ describe('CBC-HMAC construction detail', () => {
     const forgedTag = new Uint8Array(mac.digest().subarray(0, parameters.tagBytes));
 
     const opened = await openContent(algorithm, cek, iv, corrupted, forgedTag, AAD);
-    expect(opened.ok).toBe(true);
+    assert.strictEqual(opened.ok, true);
     if (opened.ok) {
-      expect(opened.value).toBeUndefined();
+      assert.strictEqual(opened.value, undefined);
     }
   });
 });
 
 describe('GCM construction detail', () => {
   test('uses a 12-byte nonce and a full 16-byte tag', () => {
-    expect(GCM_IV_BYTES).toBe(12);
-    expect(GCM_TAG_BYTES).toBe(16);
-    expect(CBC_IV_BYTES).toBe(16);
+    assert.strictEqual(GCM_IV_BYTES, 12);
+    assert.strictEqual(GCM_TAG_BYTES, 16);
+    assert.strictEqual(CBC_IV_BYTES, 16);
   });
 
   test('produces ciphertext the same length as the plaintext', async () => {
@@ -365,7 +366,7 @@ describe('GCM construction detail', () => {
     // was applied where none belongs.
     for (const algorithm of GCM) {
       const { ciphertext } = await seal(algorithm);
-      expect(ciphertext.length).toBe(PLAINTEXT.length);
+      assert.strictEqual(ciphertext.length, PLAINTEXT.length);
     }
   });
 
@@ -381,13 +382,13 @@ describe('GCM construction detail', () => {
 
     const a = await sealContent(algorithm, cek, iv, first, AAD);
     const b = await sealContent(algorithm, cek, iv, second, AAD);
-    expect(a.ok && b.ok).toBe(true);
+    assert.strictEqual(a.ok && b.ok, true);
     if (!a.ok || !b.ok) {
       return;
     }
 
     for (let i = 0; i < first.length; i += 1) {
-      expect(a.value.ciphertext[i]! ^ b.value.ciphertext[i]!).toBe(first[i]! ^ second[i]!);
+      assert.strictEqual(a.value.ciphertext[i]! ^ b.value.ciphertext[i]!, first[i]! ^ second[i]!);
     }
   });
 });

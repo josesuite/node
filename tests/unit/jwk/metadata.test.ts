@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonObject } from '../../../src/internal/json/types.ts';
@@ -29,10 +30,10 @@ function metadata(value: Record<string, unknown>) {
 describe('reading optional metadata', () => {
   test('treats every member as optional', () => {
     const result = metadata({ kty: 'oct' });
-    expect(result.use).toBeUndefined();
-    expect(result.keyOps).toBeUndefined();
-    expect(result.alg).toBeUndefined();
-    expect(result.kid).toBeUndefined();
+    assert.strictEqual(result.use, undefined);
+    assert.strictEqual(result.keyOps, undefined);
+    assert.strictEqual(result.alg, undefined);
+    assert.strictEqual(result.kid, undefined);
   });
 
   test('reads well-formed metadata', () => {
@@ -43,34 +44,34 @@ describe('reading optional metadata', () => {
       alg: 'ES256',
       kid: 'key-1',
     });
-    expect(result.use).toBe('sig');
-    expect([...result.keyOps!]).toEqual(['sign', 'verify']);
-    expect(result.alg).toBe('ES256');
-    expect(result.kid).toBe('key-1');
+    assert.strictEqual(result.use, 'sig');
+    assert.deepStrictEqual([...result.keyOps!], ['sign', 'verify']);
+    assert.strictEqual(result.alg, 'ES256');
+    assert.strictEqual(result.kid, 'key-1');
   });
 
   test('distinguishes an absent key_ops from a present empty one', () => {
     // An empty array is a deliberate statement that no operation is permitted,
     // which is not the same as saying nothing about operations at all.
-    expect(metadata({ kty: 'oct' }).keyOps).toBeUndefined();
-    expect(metadata({ kty: 'oct', key_ops: [] }).keyOps?.size).toBe(0);
+    assert.strictEqual(metadata({ kty: 'oct' }).keyOps, undefined);
+    assert.strictEqual(metadata({ kty: 'oct', key_ops: [] }).keyOps?.size, 0);
   });
 
   test('ignores unrecognized members rather than treating them as options', () => {
     const result = metadata({ kty: 'oct', 'x-vendor': { anything: true }, crit: ['x'] });
-    expect(result.alg).toBeUndefined();
+    assert.strictEqual(result.alg, undefined);
   });
 });
 
 describe('rejecting malformed metadata', () => {
   test('validates recognized certificate hints without fetching them', () => {
-    expect(read({ x5c: [] }).ok).toBe(false);
-    expect(read({ x5c: [1] }).ok).toBe(false);
-    expect(read({ x5c: ['not base64'] }).ok).toBe(false);
-    expect(read({ x5t: 'A'.repeat(26) }).ok).toBe(false);
-    expect(read({ 'x5t#S256': 'A'.repeat(42) }).ok).toBe(false);
-    expect(read({ x5u: 1 }).ok).toBe(false);
-    expect(read({ x5c: ['MAA='], x5t: Buffer.alloc(20).toString('base64url') }).ok).toBe(true);
+    assert.strictEqual(read({ x5c: [] }).ok, false);
+    assert.strictEqual(read({ x5c: [1] }).ok, false);
+    assert.strictEqual(read({ x5c: ['not base64'] }).ok, false);
+    assert.strictEqual(read({ x5t: 'A'.repeat(26) }).ok, false);
+    assert.strictEqual(read({ 'x5t#S256': 'A'.repeat(42) }).ok, false);
+    assert.strictEqual(read({ x5u: 1 }).ok, false);
+    assert.strictEqual(read({ x5c: ['MAA='], x5t: Buffer.alloc(20).toString('base64url') }).ok, true);
   });
   test('rejects wrong types', () => {
     const cases: readonly [Record<string, unknown>, string][] = [
@@ -83,33 +84,33 @@ describe('rejecting malformed metadata', () => {
 
     for (const [jwk, reason] of cases) {
       const result = read(jwk);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe(reason);
-        expect(result.category).toBe('invalid_key');
+        assert.strictEqual(result.reason, reason);
+        assert.strictEqual(result.category, 'invalid_key');
       }
     }
   });
 
   test('rejects an unrecognized use rather than ignoring the restriction', () => {
     const result = read({ kty: 'oct', use: 'signing' });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('use_unrecognized');
+      assert.strictEqual(result.reason, 'use_unrecognized');
     }
   });
 
   test('rejects unrecognized and duplicate operations', () => {
     const unknown = read({ kty: 'oct', key_ops: ['deriveBits'] });
-    expect(unknown.ok).toBe(false);
+    assert.strictEqual(unknown.ok, false);
     if (!unknown.ok) {
-      expect(unknown.reason).toBe('key_ops_unrecognized');
+      assert.strictEqual(unknown.reason, 'key_ops_unrecognized');
     }
 
     const duplicate = read({ kty: 'oct', key_ops: ['sign', 'sign'] });
-    expect(duplicate.ok).toBe(false);
+    assert.strictEqual(duplicate.ok, false);
     if (!duplicate.ok) {
-      expect(duplicate.reason).toBe('key_ops_duplicate');
+      assert.strictEqual(duplicate.reason, 'key_ops_duplicate');
     }
   });
 
@@ -127,36 +128,36 @@ describe('rejecting malformed metadata', () => {
 
     for (const jwk of conflicts) {
       const result = read(jwk);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('use_and_key_ops_conflict');
-        expect(result.category).toBe('invalid_key');
+        assert.strictEqual(result.reason, 'use_and_key_ops_conflict');
+        assert.strictEqual(result.category, 'invalid_key');
       }
     }
   });
 
   test('accepts consistent use and key_ops combinations', () => {
-    expect(read({ kty: 'oct', use: 'sig', key_ops: ['sign', 'verify'] }).ok).toBe(true);
-    expect(read({ kty: 'oct', use: 'enc', key_ops: ['wrapKey', 'unwrapKey'] }).ok).toBe(true);
-    expect(read({ kty: 'oct', use: 'enc', key_ops: ['deriveKey'] }).ok).toBe(true);
+    assert.strictEqual(read({ kty: 'oct', use: 'sig', key_ops: ['sign', 'verify'] }).ok, true);
+    assert.strictEqual(read({ kty: 'oct', use: 'enc', key_ops: ['wrapKey', 'unwrapKey'] }).ok, true);
+    assert.strictEqual(read({ kty: 'oct', use: 'enc', key_ops: ['deriveKey'] }).ok, true);
     // An empty array conflicts with nothing; it simply permits nothing.
-    expect(read({ kty: 'oct', use: 'sig', key_ops: [] }).ok).toBe(true);
+    assert.strictEqual(read({ kty: 'oct', use: 'sig', key_ops: [] }).ok, true);
   });
 
   test('bounds identifier lengths', () => {
     const longAlg = read({ kty: 'oct', alg: 'A'.repeat(65) });
-    expect(longAlg.ok).toBe(false);
+    assert.strictEqual(longAlg.ok, false);
     if (!longAlg.ok) {
-      expect(longAlg.category).toBe('resource_limit');
+      assert.strictEqual(longAlg.category, 'resource_limit');
     }
 
     const longKid = read({ kty: 'oct', kid: 'k'.repeat(257) });
-    expect(longKid.ok).toBe(false);
+    assert.strictEqual(longKid.ok, false);
     if (!longKid.ok) {
-      expect(longKid.category).toBe('resource_limit');
+      assert.strictEqual(longKid.category, 'resource_limit');
     }
 
-    expect(read({ kty: 'oct', alg: 'A'.repeat(64), kid: 'k'.repeat(256) }).ok).toBe(true);
+    assert.strictEqual(read({ kty: 'oct', alg: 'A'.repeat(64), kid: 'k'.repeat(256) }).ok, true);
   });
 });
 
@@ -167,45 +168,45 @@ describe('binding metadata to trusted configuration', () => {
       'ES256',
       'verify',
     );
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('absent metadata neither grants nor blocks permission', () => {
     // The trusted binding alone decides; silence is not permission, but it is
     // also not a restriction the key itself imposes.
-    expect(checkBinding(metadata({ kty: 'oct' }), 'HS256', 'verify').ok).toBe(true);
+    assert.strictEqual(checkBinding(metadata({ kty: 'oct' }), 'HS256', 'verify').ok, true);
   });
 
   test('rejects a key whose alg disagrees with the binding', () => {
     const result = checkBinding(metadata({ kty: 'EC', alg: 'ES384' }), 'ES256', 'verify');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('alg_binding_mismatch');
+      assert.strictEqual(result.reason, 'alg_binding_mismatch');
     }
   });
 
   test('rejects an operation the key does not permit', () => {
     const result = checkBinding(metadata({ kty: 'EC', key_ops: ['verify'] }), 'ES256', 'sign');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('operation_not_permitted');
+      assert.strictEqual(result.reason, 'operation_not_permitted');
     }
   });
 
   test('rejects an operation incompatible with the declared use', () => {
     const result = checkBinding(metadata({ kty: 'oct', use: 'enc' }), 'HS256', 'sign');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('use_not_compatible');
+      assert.strictEqual(result.reason, 'use_not_compatible');
     }
   });
 
   test('an empty key_ops permits no operation at all', () => {
     for (const operation of ['sign', 'verify', 'encrypt', 'decrypt'] as const) {
       const result = checkBinding(metadata({ kty: 'oct', key_ops: [] }), 'HS256', operation satisfies KeyOperation);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('operation_not_permitted');
+        assert.strictEqual(result.reason, 'operation_not_permitted');
       }
     }
   });
@@ -214,7 +215,7 @@ describe('binding metadata to trusted configuration', () => {
     // Even though the key advertises both operations, asking for one outside
     // the configured binding still fails on the algorithm check.
     const both = metadata({ kty: 'oct', key_ops: ['sign', 'verify'], alg: 'HS256' });
-    expect(checkBinding(both, 'HS256', 'sign').ok).toBe(true);
-    expect(checkBinding(both, 'HS512', 'sign').ok).toBe(false);
+    assert.strictEqual(checkBinding(both, 'HS256', 'sign').ok, true);
+    assert.strictEqual(checkBinding(both, 'HS512', 'sign').ok, false);
   });
 });

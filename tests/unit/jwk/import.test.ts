@@ -1,5 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
+import { inspect } from 'node:util';
 
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonObject } from '../../../src/internal/json/types.ts';
@@ -48,18 +50,18 @@ describe('importing each key type', () => {
   test('imports RSA private and public keys', () => {
     const jwk = rsaJwk();
     const priv = importKey(object(jwk), RSA_SIGN);
-    expect(priv.ok).toBe(true);
+    assert.strictEqual(priv.ok, true);
     if (priv.ok) {
-      expect(priv.key.keyType).toBe('RSA');
-      expect(priv.key.isPrivate).toBe(true);
-      expect(priv.key.algorithm).toBe('RS256');
+      assert.strictEqual(priv.key.keyType, 'RSA');
+      assert.strictEqual(priv.key.isPrivate, true);
+      assert.strictEqual(priv.key.algorithm, 'RS256');
     }
 
     const { d: _d, p: _p, q: _q, dp: _dp, dq: _dq, qi: _qi, ...publicOnly } = jwk;
     const pub = importKey(object(publicOnly), { algorithm: 'RS256', operation: 'verify' });
-    expect(pub.ok).toBe(true);
+    assert.strictEqual(pub.ok, true);
     if (pub.ok) {
-      expect(pub.key.isPrivate).toBe(false);
+      assert.strictEqual(pub.key.isPrivate, false);
     }
   });
 
@@ -69,28 +71,28 @@ describe('importing each key type', () => {
     // private material instead of reporting the incomplete group.
     const { d: _d, ...orphan } = rsaJwk();
     const result = importKey(object(orphan), { algorithm: 'RS256', operation: 'verify' });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('d_missing');
+      assert.strictEqual(result.reason, 'd_missing');
     }
   });
 
   test('imports EC keys and refuses unqualified signing OKP keys', () => {
-    expect(importKey(object(ecJwk()), EC_VERIFY).ok).toBe(true);
-    expect(importKey(object(ed25519Jwk()), ED_VERIFY).ok).toBe(false);
+    assert.strictEqual(importKey(object(ecJwk()), EC_VERIFY).ok, true);
+    assert.strictEqual(importKey(object(ed25519Jwk()), ED_VERIFY).ok, false);
   });
 
   test('imports symmetric keys and enforces the algorithm minimum', () => {
     const ok = importKey(object(octJwk(32)), { ...HS_VERIFY, minimumSymmetricBytes: 32 });
-    expect(ok.ok).toBe(true);
+    assert.strictEqual(ok.ok, true);
     if (ok.ok) {
-      expect(ok.key.isPrivate).toBe(true);
+      assert.strictEqual(ok.key.isPrivate, true);
     }
 
     const short = importKey(object(octJwk(31)), { ...HS_VERIFY, minimumSymmetricBytes: 32 });
-    expect(short.ok).toBe(false);
+    assert.strictEqual(short.ok, false);
     if (!short.ok) {
-      expect(short.category).toBe('incompatible_key');
+      assert.strictEqual(short.category, 'incompatible_key');
     }
   });
 
@@ -100,21 +102,21 @@ describe('importing each key type', () => {
     // supplies no `minimumSymmetricBytes`.
     for (const bytes of [0, 16, 31]) {
       const result = importKey(object(octJwk(bytes)), HS_VERIFY);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('symmetric_key_too_short');
+        assert.strictEqual(result.reason, 'symmetric_key_too_short');
       }
     }
 
-    expect(importKey(object(octJwk(32)), HS_VERIFY).ok).toBe(true);
+    assert.strictEqual(importKey(object(octJwk(32)), HS_VERIFY).ok, true);
   });
 
   test('refuses a key whose type cannot carry the bound algorithm', () => {
     const result = importKey(object(octJwk(32)), { algorithm: 'RS256', operation: 'verify' });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('incompatible_key');
-      expect(result.reason).toBe('key_type_not_eligible_for_algorithm');
+      assert.strictEqual(result.category, 'incompatible_key');
+      assert.strictEqual(result.reason, 'key_type_not_eligible_for_algorithm');
     }
   });
 
@@ -123,12 +125,12 @@ describe('importing each key type', () => {
 
     // ES256 names P-256; a P-384 key is not interchangeable with it.
     const mismatch = importKey(object(p384), { algorithm: 'ES256', operation: 'sign' });
-    expect(mismatch.ok).toBe(false);
+    assert.strictEqual(mismatch.ok, false);
     if (!mismatch.ok) {
-      expect(mismatch.reason).toBe('curve_not_eligible_for_algorithm');
+      assert.strictEqual(mismatch.reason, 'curve_not_eligible_for_algorithm');
     }
 
-    expect(importKey(object(p384), { algorithm: 'ES384', operation: 'sign' }).ok).toBe(true);
+    assert.strictEqual(importKey(object(p384), { algorithm: 'ES384', operation: 'sign' }).ok, true);
   });
 
   test('gives a private key and its public half the same identity', () => {
@@ -137,45 +139,45 @@ describe('importing each key type', () => {
     const { d: _d, ...publicOnly } = jwk;
     const pub = importKey(object(publicOnly), EC_VERIFY);
 
-    expect(priv.ok && pub.ok).toBe(true);
+    assert.strictEqual(priv.ok && pub.ok, true);
     if (priv.ok && pub.ok) {
       // The same cryptographic key must count once, however it was supplied.
-      expect(sameKeyMaterial(priv.key.identity, pub.key.identity)).toBe(true);
+      assert.strictEqual(sameKeyMaterial(priv.key.identity, pub.key.identity), true);
     }
   });
 });
 
 describe('structural rejections', () => {
   test('requires a well-formed kty', () => {
-    expect(importKey(object({ n: 'x', e: 'AQAB' }), RSA_SIGN).ok).toBe(false);
+    assert.strictEqual(importKey(object({ n: 'x', e: 'AQAB' }), RSA_SIGN).ok, false);
 
     const mistyped = importKey(object({ kty: 1 }), RSA_SIGN);
-    expect(mistyped.ok).toBe(false);
+    assert.strictEqual(mistyped.ok, false);
     if (!mistyped.ok) {
-      expect(mistyped.reason).toBe('kty_not_a_string');
+      assert.strictEqual(mistyped.reason, 'kty_not_a_string');
     }
   });
 
   test('refuses an unknown key type rather than guessing', () => {
     const result = importKey(object({ kty: 'XYZ', x: 'AA' }), EC_VERIFY);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('kty_unsupported');
-      expect(result.category).toBe('incompatible_key');
+      assert.strictEqual(result.reason, 'kty_unsupported');
+      assert.strictEqual(result.category, 'incompatible_key');
     }
   });
 
   test('requires a supported curve', () => {
     const missing = importKey(object({ kty: 'EC', x: 'AA', y: 'AA' }), EC_VERIFY);
-    expect(missing.ok).toBe(false);
+    assert.strictEqual(missing.ok, false);
     if (!missing.ok) {
-      expect(missing.reason).toBe('crv_missing');
+      assert.strictEqual(missing.reason, 'crv_missing');
     }
 
     const unsupported = importKey(object({ kty: 'EC', crv: 'P-192', x: 'AA', y: 'AA' }), EC_VERIFY);
-    expect(unsupported.ok).toBe(false);
+    assert.strictEqual(unsupported.ok, false);
     if (!unsupported.ok) {
-      expect(unsupported.reason).toBe('crv_unsupported');
+      assert.strictEqual(unsupported.reason, 'crv_unsupported');
     }
   });
 
@@ -185,9 +187,9 @@ describe('structural rejections', () => {
     const jwk = rsaJwk();
     const { qi: _qi, ...missingQi } = jwk;
     const result = importKey(object(missingQi), RSA_SIGN);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('qi_missing');
+      assert.strictEqual(result.reason, 'qi_missing');
     }
   });
 
@@ -195,9 +197,9 @@ describe('structural rejections', () => {
     const a = ecJwk();
     const b = ecJwk();
     const result = importKey(object({ ...a, x: b['x']!, y: b['y']! }), EC_VERIFY);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('public_private_mismatch');
+      assert.strictEqual(result.reason, 'public_private_mismatch');
     }
   });
 
@@ -206,9 +208,9 @@ describe('structural rejections', () => {
       'base64url',
     );
     const result = importKey(object({ kty: 'OKP', crv: 'Ed25519', x }), ED_VERIFY);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('curve_not_qualified');
+      assert.strictEqual(result.reason, 'curve_not_qualified');
     }
   });
 });
@@ -216,45 +218,49 @@ describe('structural rejections', () => {
 describe('binding to trusted configuration', () => {
   test('requires explicit content bindings and the specified JOSE operation mapping', () => {
     const direct = octJwk(16);
-    expect(importKey(object(direct), { algorithm: 'dir', operation: 'encrypt' }).ok).toBe(false);
-    expect(
+    assert.strictEqual(importKey(object(direct), { algorithm: 'dir', operation: 'encrypt' }).ok, false);
+    assert.strictEqual(
       importKey(object(direct), {
         algorithm: 'dir',
         operation: 'encrypt',
         contentAlgorithms: ['A128GCM', 'A128CBC-HS256'],
       }).ok,
-    ).toBe(false);
-    expect(
+      false,
+    );
+    assert.strictEqual(
       importKey(object(octJwk(32)), {
         algorithm: 'dir',
         operation: 'encrypt',
         contentAlgorithms: ['A128GCM'],
       }).ok,
-    ).toBe(false);
+      false,
+    );
 
     const agreement = { ...ecJwk(), use: 'enc', key_ops: ['deriveKey'] };
-    expect(
+    assert.strictEqual(
       importKey(object(agreement), {
         algorithm: 'ECDH-ES',
         operation: 'deriveKey',
         contentAlgorithms: ['A128GCM'],
       }).ok,
-    ).toBe(true);
-    expect(
+      true,
+    );
+    assert.strictEqual(
       importKey(object(agreement), {
         algorithm: 'ECDH-ES',
         operation: 'encrypt',
         contentAlgorithms: ['A128GCM'],
       }).ok,
-    ).toBe(false);
+      false,
+    );
   });
 
   test('rejects a key whose alg disagrees with the binding', () => {
     const result = importKey(object({ ...ecJwk(), alg: 'ES384' }), EC_VERIFY);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('incompatible_key');
-      expect(result.reason).toBe('alg_binding_mismatch');
+      assert.strictEqual(result.category, 'incompatible_key');
+      assert.strictEqual(result.reason, 'alg_binding_mismatch');
     }
   });
 
@@ -263,17 +269,17 @@ describe('binding to trusted configuration', () => {
       algorithm: 'ES256',
       operation: 'sign',
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('operation_not_permitted');
+      assert.strictEqual(result.reason, 'operation_not_permitted');
     }
   });
 
   test('rejects a key whose declared use is incompatible', () => {
     const result = importKey(object({ ...ecJwk(), use: 'enc' }), EC_VERIFY);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('use_not_compatible');
+      assert.strictEqual(result.reason, 'use_not_compatible');
     }
   });
 
@@ -281,10 +287,10 @@ describe('binding to trusted configuration', () => {
     // The key contradicts itself about its own purpose, which is a defect in
     // the key rather than a disagreement with this particular binding.
     const result = importKey(object({ ...ecJwk(), use: 'sig', key_ops: ['encrypt'] }), EC_VERIFY);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_key');
-      expect(result.reason).toBe('use_and_key_ops_conflict');
+      assert.strictEqual(result.category, 'invalid_key');
+      assert.strictEqual(result.reason, 'use_and_key_ops_conflict');
     }
   });
 
@@ -292,8 +298,8 @@ describe('binding to trusted configuration', () => {
     const jwk = ecJwk();
     // Nothing in the key mentions an algorithm, so the binding alone decides,
     // and the same key can be imported under a different binding elsewhere.
-    expect(importKey(object(jwk), EC_VERIFY).ok).toBe(true);
-    expect(importKey(object(jwk), { algorithm: 'ES256', operation: 'sign' }).ok).toBe(true);
+    assert.strictEqual(importKey(object(jwk), EC_VERIFY).ok, true);
+    assert.strictEqual(importKey(object(jwk), { algorithm: 'ES256', operation: 'sign' }).ok, true);
   });
 
   test('validates material before checking the binding', () => {
@@ -301,10 +307,10 @@ describe('binding to trusted configuration', () => {
     // so a malformed key is never described as merely incompatible.
     const offCurve = Buffer.alloc(32, 9).toString('base64url');
     const result = importKey(object({ kty: 'EC', crv: 'P-256', x: offCurve, y: offCurve, alg: 'ES384' }), EC_VERIFY);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_key');
-      expect(result.reason).toBe('point_not_on_curve');
+      assert.strictEqual(result.category, 'invalid_key');
+      assert.strictEqual(result.reason, 'point_not_on_curve');
     }
   });
 });
@@ -314,9 +320,9 @@ describe('RSA modulus policy', () => {
     const jwk = rsaJwk(2048);
 
     const modern = importKey(object(jwk), RSA_SIGN);
-    expect(modern.ok).toBe(false);
+    assert.strictEqual(modern.ok, false);
     if (!modern.ok) {
-      expect(modern.reason).toBe('n_too_small');
+      assert.strictEqual(modern.reason, 'n_too_small');
     }
 
     const receive = importKey(object(jwk), {
@@ -324,7 +330,7 @@ describe('RSA modulus policy', () => {
       operation: 'verify',
       receiveOnly: true,
     });
-    expect(receive.ok).toBe(true);
+    assert.strictEqual(receive.ok, true);
   });
 });
 
@@ -334,7 +340,7 @@ describe('optional curves', () => {
       const algorithm =
         curve === 'secp256k1' ? 'ES256K' : curve === 'P-384' ? 'ES384' : curve === 'P-521' ? 'ES512' : 'ES256';
       const result = importKey(object(ecJwk(curve)), { algorithm, operation: 'verify' });
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
     }
   });
 });
@@ -343,18 +349,18 @@ describe('algorithm binding is validated against the registry', () => {
   test('refuses an unrecognized algorithm identifier', () => {
     const result = importKey(object(ecJwk()), { algorithm: 'ES256-TOTALLY-MADE-UP', operation: 'verify' });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('unsupported_algorithm');
+      assert.strictEqual(result.category, 'unsupported_algorithm');
     }
   });
 
   test('refuses a prohibited algorithm at import', () => {
     for (const algorithm of ['none', 'RS1', 'HS1']) {
       const result = importKey(object(ecJwk()), { algorithm, operation: 'verify' });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.category).toBe('prohibited_algorithm');
+        assert.strictEqual(result.category, 'prohibited_algorithm');
       }
     }
   });
@@ -364,9 +370,9 @@ describe('algorithm binding is validated against the registry', () => {
     // cannot be bound to a signing key.
     for (const algorithm of ['A128GCM', 'RSA-OAEP-256', 'dir']) {
       const result = importKey(object(ecJwk()), { algorithm, operation: 'verify' });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.category).toBe('unsupported_algorithm');
+        assert.strictEqual(result.category, 'unsupported_algorithm');
       }
     }
   });
@@ -379,26 +385,26 @@ describe('algorithm binding is validated against the registry', () => {
     // The deprecated polymorphic identifier is accepted for verification but
     // must never be used to create a signature.
     const create = importKey(object(jwk), { algorithm: 'EdDSA', operation: 'sign' });
-    expect(create.ok).toBe(false);
+    assert.strictEqual(create.ok, false);
     if (!create.ok) {
-      expect(create.category).toBe('unsupported_algorithm');
+      assert.strictEqual(create.category, 'unsupported_algorithm');
     }
 
-    expect(importKey(object(jwk), { algorithm: 'EdDSA', operation: 'verify' }).ok).toBe(false);
+    assert.strictEqual(importKey(object(jwk), { algorithm: 'EdDSA', operation: 'verify' }).ok, false);
   });
 
   test('refuses an identifier registered only for signatures on an encryption operation', () => {
     const result = importKey(object(rsaJwk()), { algorithm: 'RS256', operation: 'unwrapKey' });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('unsupported_algorithm');
+      assert.strictEqual(result.category, 'unsupported_algorithm');
     }
   });
 
   test('still accepts a correctly bound algorithm', () => {
-    expect(importKey(object(ecJwk()), { algorithm: 'ES256', operation: 'verify' }).ok).toBe(true);
-    expect(importKey(object(rsaJwk()), { algorithm: 'PS256', operation: 'sign' }).ok).toBe(true);
+    assert.strictEqual(importKey(object(ecJwk()), { algorithm: 'ES256', operation: 'verify' }).ok, true);
+    assert.strictEqual(importKey(object(rsaJwk()), { algorithm: 'PS256', operation: 'sign' }).ok, true);
   });
 });
 
@@ -434,11 +440,13 @@ describe('imported keys are sealed', () => {
         secretBytes = result.key.material.d;
       }
       const secret = [...secretBytes].join(', ');
-      for (const rendered of [JSON.stringify(result.key), Bun.inspect(result.key)]) {
-        expect(rendered).not.toContain('material');
-        expect(rendered).not.toContain(secret);
+      // Unlimited depth so nested material cannot hide behind the default cutoff.
+      const inspected = inspect(result.key, { depth: null });
+      for (const rendered of [JSON.stringify(result.key), inspected]) {
+        assert.ok(!rendered.includes('material'));
+        assert.ok(!rendered.includes(secret));
       }
-      expect(Object.keys(result.key)).not.toContain('material');
+      assert.ok(!Object.keys(result.key).includes('material'));
     });
 
     test(`${family} material cannot be changed after validation`, () => {
@@ -448,11 +456,11 @@ describe('imported keys are sealed', () => {
       }
       const key = result.key;
 
-      expect(Object.isFrozen(key)).toBe(true);
-      expect(() => {
+      assert.strictEqual(Object.isFrozen(key), true);
+      assert.throws(() => {
         (key as { algorithm: string }).algorithm = 'HS512';
-      }).toThrow();
-      expect(key.algorithm).toBe(algorithm);
+      });
+      assert.strictEqual(key.algorithm, algorithm);
     });
   }
 
@@ -471,8 +479,8 @@ describe('imported keys are sealed', () => {
       throw new Error('unexpected key shape');
     }
 
-    expect(key.identity.k).not.toBe(key.material);
-    expect(key.identity.k).toEqual(key.material);
+    assert.notStrictEqual(key.identity.k, key.material);
+    assert.deepStrictEqual(key.identity.k, key.material);
   });
 
   test('changing the source JWK arrays after import does not change the key', () => {
@@ -494,7 +502,7 @@ describe('imported keys are sealed', () => {
       throw new Error('unexpected member');
     }
 
-    expect([...key.material]).toEqual([...secret]);
+    assert.deepStrictEqual([...key.material], [...secret]);
   });
 
   test('a record copied from an imported key is not usable for cryptography', async () => {
@@ -509,9 +517,9 @@ describe('imported keys are sealed', () => {
     const forged = { ...result.key, material: result.key.material } as typeof result.key;
     const signed = await signWithKey(forged, new TextEncoder().encode('input'));
 
-    expect(signed.ok).toBe(false);
+    assert.strictEqual(signed.ok, false);
     if (!signed.ok) {
-      expect(signed.failure).toBe('operation_failed');
+      assert.strictEqual(signed.failure, 'operation_failed');
     }
   });
 });
@@ -522,19 +530,19 @@ describe('metadata size limits', () => {
     // code units would admit a `kid` roughly twice the limit here and reject the
     // same key where a header `kid` is measured in bytes.
     const oversized = '\u{1F600}'.repeat(Math.ceil(LIMITS_V1.kid / 4) + 1);
-    expect(oversized.length).toBeLessThanOrEqual(LIMITS_V1.kid);
+    assert.ok(oversized.length <= LIMITS_V1.kid);
 
     const result = importKey(object({ ...octJwk(), kid: oversized }), HS_VERIFY);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
-      expect(result.reason).toBe('kid_too_long');
+      assert.strictEqual(result.category, 'resource_limit');
+      assert.strictEqual(result.reason, 'kid_too_long');
     }
   });
 
   test('accepts a kid at exactly the byte limit', () => {
     const result = importKey(object({ ...octJwk(), kid: 'a'.repeat(LIMITS_V1.kid) }), HS_VERIFY);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 });

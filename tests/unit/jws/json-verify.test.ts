@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 
 import { parseJson } from '../../../src/internal/json/parse.ts';
@@ -105,14 +106,14 @@ describe('round trips', () => {
     const alice = ecSigner('alice');
     const serialized = await sign([alice], ['ES256']);
 
-    expect(JSON.parse(serialized).signatures).toHaveLength(1);
+    assert.strictEqual(JSON.parse(serialized).signatures.length, 1);
 
     const result = await verify(serialized, trust(alice), namedSigner('alice'));
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(new TextDecoder().decode(result.payload)).toBe('{"sub":"alice"}');
-      expect([...result.principals]).toEqual(['alice']);
-      expect(result.entries).toHaveLength(1);
+      assert.strictEqual(new TextDecoder().decode(result.payload), '{"sub":"alice"}');
+      assert.deepStrictEqual([...result.principals], ['alice']);
+      assert.strictEqual(result.entries.length, 1);
     }
   });
 
@@ -121,10 +122,10 @@ describe('round trips', () => {
     const serialized = await sign([alice], ['ES256'], { flattened: true });
 
     const parsed = JSON.parse(serialized);
-    expect(parsed.signatures).toBeUndefined();
-    expect(typeof parsed.signature).toBe('string');
+    assert.strictEqual(parsed.signatures, undefined);
+    assert.strictEqual(typeof parsed.signature, 'string');
 
-    expect((await verify(serialized, trust(alice), namedSigner('alice'))).ok).toBe(true);
+    assert.strictEqual((await verify(serialized, trust(alice), namedSigner('alice'))).ok, true);
   });
 
   test('verifies several signatures from different signers', async () => {
@@ -133,9 +134,9 @@ describe('round trips', () => {
     const serialized = await sign([alice, bob], ['ES256']);
 
     const result = await verify(serialized, trust(alice, bob), allRequiredSigners(['alice', 'bob']));
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect([...result.principals].toSorted()).toEqual(['alice', 'bob']);
+      assert.deepStrictEqual([...result.principals].toSorted(), ['alice', 'bob']);
     }
   });
 
@@ -149,17 +150,17 @@ describe('round trips', () => {
       signers: [{ key: alice.signing, unprotectedHeader: { kid: alice.kid } }],
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) {
       return;
     }
 
     const verified = await verify(result.value, trust(alice), namedSigner('alice'));
-    expect(verified.ok).toBe(true);
+    assert.strictEqual(verified.ok, true);
     if (verified.ok) {
       // The hint is visible but marked as not covered by the signature.
       const kid = verified.entries[0]!.header?.parameters.get('kid');
-      expect(kid?.origin).toBe('per_entry_unprotected');
+      assert.strictEqual(kid?.origin, 'per_entry_unprotected');
     }
   });
 });
@@ -171,13 +172,13 @@ describe('aggregate policy decides acceptance', () => {
     const serialized = await sign([alice], ['ES256']);
 
     const result = await verify(serialized, trust(alice, bob), namedSigner('bob'));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('aggregate_policy_unsatisfied');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'aggregate_policy_unsatisfied');
       // The valid signature is still reported, it just is not the one required.
-      expect(result.entries[0]!.ok).toBe(true);
-      expect(result.entries[0]!.principalId).toBe('alice');
+      assert.strictEqual(result.entries[0]!.ok, true);
+      assert.strictEqual(result.entries[0]!.principalId, 'alice');
     }
   });
 
@@ -188,9 +189,9 @@ describe('aggregate policy decides acceptance', () => {
     const serialized = await sign([alice], ['ES256']);
 
     const result = await verify(serialized, trust(alice, bob, carol), thresholdOfSigners(['alice', 'bob', 'carol'], 2));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
+      assert.strictEqual(result.category, 'policy_violation');
     }
   });
 
@@ -201,7 +202,7 @@ describe('aggregate policy decides acceptance', () => {
     const serialized = await sign([alice, bob], ['ES256']);
 
     const result = await verify(serialized, trust(alice, bob, carol), thresholdOfSigners(['alice', 'bob', 'carol'], 2));
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('a signer outside the eligible set does not fill a threshold', async () => {
@@ -211,10 +212,10 @@ describe('aggregate policy decides acceptance', () => {
 
     // Two valid signatures, but only one belongs to an eligible principal.
     const result = await verify(serialized, trust(alice, mallory), thresholdOfSigners(['alice', 'bob'], 2));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.entries.filter((e) => e.ok)).toHaveLength(2);
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.entries.filter((e) => e.ok).length, 2);
     }
   });
 });
@@ -232,13 +233,13 @@ describe('failed entries do not erase successes', () => {
     parsed.signatures.push(broken);
 
     const result = await verify(JSON.stringify(parsed), trust(alice), namedSigner('alice'));
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect([...result.principals]).toEqual(['alice']);
+      assert.deepStrictEqual([...result.principals], ['alice']);
       // Both entries keep their own outcome.
-      expect(result.entries).toHaveLength(2);
-      expect(result.entries.filter((e) => e.ok)).toHaveLength(1);
-      expect(result.entries.filter((e) => !e.ok)).toHaveLength(1);
+      assert.strictEqual(result.entries.length, 2);
+      assert.strictEqual(result.entries.filter((e) => e.ok).length, 1);
+      assert.strictEqual(result.entries.filter((e) => !e.ok).length, 1);
     }
   });
 
@@ -253,11 +254,11 @@ describe('failed entries do not erase successes', () => {
     parsed.signatures[0].signature = bytes.toString('base64url');
 
     const result = await verify(JSON.stringify(parsed), trust(alice, bob), namedSigner('bob'));
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.entries[0]!.ok).toBe(false);
-      expect(result.entries[1]!.ok).toBe(true);
-      expect([...result.principals]).toEqual(['bob']);
+      assert.strictEqual(result.entries[0]!.ok, false);
+      assert.strictEqual(result.entries[1]!.ok, true);
+      assert.deepStrictEqual([...result.principals], ['bob']);
     }
   });
 
@@ -269,10 +270,10 @@ describe('failed entries do not erase successes', () => {
 
     // Two valid entries, but one principal, so a two-signer threshold fails.
     const result = await verify(JSON.stringify(parsed), trust(alice), thresholdOfSigners(['alice', 'bob'], 2));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.entries.filter((e) => e.ok)).toHaveLength(2);
-      expect(result.category).toBe('policy_violation');
+      assert.strictEqual(result.entries.filter((e) => e.ok).length, 2);
+      assert.strictEqual(result.category, 'policy_violation');
     }
   });
 });
@@ -290,11 +291,11 @@ describe('whole-object rejection', () => {
     });
 
     const result = await verify(JSON.stringify(parsed), trust(alice), namedSigner('alice'));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
       // Rejected before any entry is evaluated, so the valid one does not save it.
-      expect(result.category).toBe('prohibited_algorithm');
-      expect(result.entries).toHaveLength(0);
+      assert.strictEqual(result.category, 'prohibited_algorithm');
+      assert.strictEqual(result.entries.length, 0);
     }
   });
 
@@ -312,9 +313,9 @@ describe('whole-object rejection', () => {
     parsed.signatures.push({ protected: 'not!base64url', signature: 'AAAA' });
 
     const result = await verify(JSON.stringify(parsed), trust(alice), namedSigner('alice'));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('prohibited_algorithm');
+      assert.strictEqual(result.category, 'prohibited_algorithm');
     }
   });
 
@@ -329,11 +330,11 @@ describe('whole-object rejection', () => {
     parsed.signatures[1].signature = 'not!base64url';
 
     const result = await verify(JSON.stringify(parsed), trust(alice, bob), namedSigner('alice'));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_encoding');
-      expect(result.reason).toBe('signature_invalid');
-      expect(result.entries).toEqual([]);
+      assert.strictEqual(result.category, 'invalid_encoding');
+      assert.strictEqual(result.reason, 'signature_invalid');
+      assert.deepStrictEqual(result.entries, []);
     }
   });
 
@@ -353,9 +354,9 @@ describe('whole-object rejection', () => {
     const result = await verify(JSON.stringify(parsed), trust(alice, bob), namedSigner('alice'), ['ES256'], {
       unencodedPayload: true,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('inconsistent_b64_across_signatures');
+      assert.strictEqual(result.reason, 'inconsistent_b64_across_signatures');
     }
   });
 
@@ -374,10 +375,10 @@ describe('whole-object rejection', () => {
     const result = await verify(JSON.stringify(parsed), trust(alice, bob), namedSigner('alice'), ['ES256'], {
       unencodedPayload: true,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('inconsistent_b64_across_signatures');
-      expect(result.category).toBe('invalid_header');
+      assert.strictEqual(result.reason, 'inconsistent_b64_across_signatures');
+      assert.strictEqual(result.category, 'invalid_header');
     }
   });
 
@@ -391,10 +392,10 @@ describe('whole-object rejection', () => {
     );
 
     const result = await verify(JSON.stringify(parsed), trust(alice), namedSigner('alice'));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('unencoded_payload_not_accepted');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'unencoded_payload_not_accepted');
     }
   });
 });
@@ -408,11 +409,11 @@ describe('key resolution', () => {
     // Only alice's key is trusted; bob's entry names a `kid` absent from the
     // snapshot, so it resolves to no key rather than being tried against alice's.
     const result = await verify(serialized, trust(alice), namedSigner('alice'));
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect([...result.principals]).toEqual(['alice']);
+      assert.deepStrictEqual([...result.principals], ['alice']);
       const failed = result.entries.find((e) => !e.ok);
-      expect(failed?.category).toBe('key_resolution_failure');
+      assert.strictEqual(failed?.category, 'key_resolution_failure');
     }
   });
 
@@ -434,10 +435,10 @@ describe('key resolution', () => {
     parsed.signatures[0].header = { kid: 'alice' };
 
     const result = await verify(JSON.stringify(parsed), trust(alice), namedSigner('alice'));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('aggregate_policy_unsatisfied');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'aggregate_policy_unsatisfied');
     }
   });
 
@@ -452,11 +453,11 @@ describe('key resolution', () => {
     parsed.signatures[1].header = { kid: 'bob' };
 
     const result = await verify(JSON.stringify(parsed), trust(alice, bob), namedSigner('alice'));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_header');
+      assert.strictEqual(result.category, 'invalid_header');
       // No entry ran, so none carries a status to report.
-      expect(result.entries).toEqual([]);
+      assert.deepStrictEqual(result.entries, []);
     }
   });
 });
@@ -465,14 +466,14 @@ describe('detached payloads', () => {
   test('round trips a detached payload', async () => {
     const alice = ecSigner('alice');
     const serialized = await sign([alice], ['ES256'], { detached: true });
-    expect(JSON.parse(serialized).payload).toBeUndefined();
+    assert.strictEqual(JSON.parse(serialized).payload, undefined);
 
     const result = await verify(serialized, trust(alice), namedSigner('alice'), ['ES256'], {
       detachedPayload: PAYLOAD,
     });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(new TextDecoder().decode(result.payload)).toBe('{"sub":"alice"}');
+      assert.strictEqual(new TextDecoder().decode(result.payload), '{"sub":"alice"}');
     }
   });
 
@@ -482,9 +483,9 @@ describe('detached payloads', () => {
 
     // Detachment is never inferred from the missing member.
     const result = await verify(serialized, trust(alice), namedSigner('alice'));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('payload_missing');
+      assert.strictEqual(result.reason, 'payload_missing');
     }
   });
 
@@ -495,9 +496,9 @@ describe('detached payloads', () => {
     const result = await verify(serialized, trust(alice), namedSigner('alice'), ['ES256'], {
       detachedPayload: PAYLOAD,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('ambiguous_payload_source');
+      assert.strictEqual(result.reason, 'ambiguous_payload_source');
     }
   });
 });
@@ -512,9 +513,9 @@ describe('MAC entries', () => {
     const result = await verify(serialized, trust(alice), namedSigner('alice-hmac'), ['HS256'], {
       sharedSecretDomains: true,
     });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect([...result.principals]).toEqual(['alice-hmac']);
+      assert.deepStrictEqual([...result.principals], ['alice-hmac']);
     }
   });
 
@@ -525,10 +526,10 @@ describe('MAC entries', () => {
     // A MAC proves only that some holder of the secret produced the entry, so
     // without the explicit profile it cannot satisfy a signer policy.
     const result = await verify(serialized, trust(alice), namedSigner('alice-hmac'), ['HS256']);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.stage).toBe('configuration');
-      expect(result.reason).toBe('mac_principal_requires_shared_secret_profile');
+      assert.strictEqual(result.stage, 'configuration');
+      assert.strictEqual(result.reason, 'mac_principal_requires_shared_secret_profile');
     }
   });
 });
@@ -545,10 +546,10 @@ describe('trusted signer configuration', () => {
       { principalId: 'alice-alias', key: alice.verification },
     ];
     const result = await verify(serialized, aliased, thresholdOfSigners(['alice', 'alice-alias'], 2));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.stage).toBe('configuration');
-      expect(result.reason).toBe('shared_key_material_across_principals');
+      assert.strictEqual(result.stage, 'configuration');
+      assert.strictEqual(result.reason, 'shared_key_material_across_principals');
     }
   });
 
@@ -565,10 +566,10 @@ describe('trusted signer configuration', () => {
     const result = await verify(serialized, aliased, thresholdOfSigners(['alice-hmac', 'other-hmac'], 2), ['HS256'], {
       sharedSecretDomains: true,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.stage).toBe('configuration');
-      expect(result.reason).toBe('shared_key_material_across_principals');
+      assert.strictEqual(result.stage, 'configuration');
+      assert.strictEqual(result.reason, 'shared_key_material_across_principals');
     }
   });
 
@@ -582,10 +583,10 @@ describe('trusted signer configuration', () => {
       ok: true,
       policy: { kind: 'all', required: new Set<string>() },
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.stage).toBe('configuration');
-      expect(result.reason).toBe('aggregate_policy_references_no_principal');
+      assert.strictEqual(result.stage, 'configuration');
+      assert.strictEqual(result.reason, 'aggregate_policy_references_no_principal');
     }
   });
 });
@@ -601,9 +602,9 @@ describe('creation guards', () => {
       flattened: true,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('flattened_requires_single_signature');
+      assert.strictEqual(result.reason, 'flattened_requires_single_signature');
     }
   });
 
@@ -621,9 +622,9 @@ describe('creation guards', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('header_name_collision');
+      assert.strictEqual(result.reason, 'header_name_collision');
     }
   });
 
@@ -637,10 +638,10 @@ describe('creation guards', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_header');
-      expect(result.reason).toBe('header_kid_wrong_type');
+      assert.strictEqual(result.category, 'invalid_header');
+      assert.strictEqual(result.reason, 'header_kid_wrong_type');
     }
   });
 
@@ -652,9 +653,9 @@ describe('creation guards', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('unprotected_header_empty');
+      assert.strictEqual(result.reason, 'unprotected_header_empty');
     }
   });
 
@@ -666,7 +667,7 @@ describe('creation guards', () => {
         signers: [{ key: alice.signing, protectedHeader: { [name]: 'x' } }],
         limits: LIMITS_V1,
       });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
     }
   });
 
@@ -676,9 +677,9 @@ describe('creation guards', () => {
       signers: [],
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('no_signers');
+      assert.strictEqual(result.reason, 'no_signers');
     }
   });
 });
@@ -694,16 +695,16 @@ describe('key resolution requires exactly one eligible key', () => {
       signers: [{ key: alice.signing }],
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) {
       return;
     }
 
     const verified = await verify(result.value, trust(alice, bob), namedSigner('alice'));
-    expect(verified.ok).toBe(false);
+    assert.strictEqual(verified.ok, false);
     if (!verified.ok) {
-      expect(verified.entries[0]!.category).toBe('key_resolution_failure');
-      expect(verified.entries[0]!.reason).toBe('ambiguous_key');
+      assert.strictEqual(verified.entries[0]!.category, 'key_resolution_failure');
+      assert.strictEqual(verified.entries[0]!.reason, 'ambiguous_key');
     }
   });
 
@@ -717,17 +718,17 @@ describe('key resolution requires exactly one eligible key', () => {
       signers: [{ key: mallory.signing, protectedHeader: { kid: 'alice' } }],
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) {
       return;
     }
 
     // The hint selects alice's key, under which the signature does not verify.
     const verified = await verify(result.value, trust(alice, mallory), namedSigner('alice'));
-    expect(verified.ok).toBe(false);
+    assert.strictEqual(verified.ok, false);
     if (!verified.ok) {
-      expect(verified.entries[0]!.category).toBe('signature_verification_failure');
-      expect(verified.entries[0]!.principalId).toBeUndefined();
+      assert.strictEqual(verified.entries[0]!.category, 'signature_verification_failure');
+      assert.strictEqual(verified.entries[0]!.principalId, undefined);
     }
   });
 
@@ -738,7 +739,7 @@ describe('key resolution requires exactly one eligible key', () => {
       signers: [{ key: alice.signing, protectedHeader: { kid: 'no-such-key' } }],
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) {
       return;
     }
@@ -747,10 +748,10 @@ describe('key resolution requires exactly one eligible key', () => {
     // must not fall back to a differently-named trusted key, even when that key
     // is the only candidate and the signature would verify under it.
     const verified = await verify(result.value, trust(alice), namedSigner('alice'));
-    expect(verified.ok).toBe(false);
+    assert.strictEqual(verified.ok, false);
     if (!verified.ok) {
-      expect(verified.entries[0]!.category).toBe('key_resolution_failure');
-      expect(verified.entries[0]!.reason).toBe('no_eligible_key');
+      assert.strictEqual(verified.entries[0]!.category, 'key_resolution_failure');
+      assert.strictEqual(verified.entries[0]!.reason, 'no_eligible_key');
     }
   });
 });
@@ -766,11 +767,11 @@ describe('resource limits reach the whole operation', () => {
       limits: lowerLimits({ cryptographicAttempts: 0 }),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
       const entry = result.entries[0]!;
-      expect(entry.category).toBe('resource_limit');
-      expect(entry.reason).toBe('cryptographic_attempt_budget_exceeded');
+      assert.strictEqual(entry.category, 'resource_limit');
+      assert.strictEqual(entry.reason, 'cryptographic_attempt_budget_exceeded');
     }
   });
 
@@ -785,9 +786,9 @@ describe('resource limits reach the whole operation', () => {
       limits: lowerLimits({ cryptographicAttempts: 1 }),
     });
 
-    expect(result.entries).toHaveLength(2);
-    expect(result.entries[0]!.ok).toBe(true);
-    expect(result.entries[1]!.reason).toBe('cryptographic_attempt_budget_exceeded');
+    assert.strictEqual(result.entries.length, 2);
+    assert.strictEqual(result.entries[0]!.ok, true);
+    assert.strictEqual(result.entries[1]!.reason, 'cryptographic_attempt_budget_exceeded');
   });
 
   test('exhausting the budget rejects the object even when the policy is already satisfied', async () => {
@@ -802,12 +803,12 @@ describe('resource limits reach the whole operation', () => {
       limits: lowerLimits({ cryptographicAttempts: 1 }),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
-      expect(result.reason).toBe('cryptographic_attempt_budget_exceeded');
+      assert.strictEqual(result.category, 'resource_limit');
+      assert.strictEqual(result.reason, 'cryptographic_attempt_budget_exceeded');
       // The entry that succeeded before exhaustion is still reported.
-      expect(result.entries[0]!.ok).toBe(true);
+      assert.strictEqual(result.entries[0]!.ok, true);
     }
   });
 });
@@ -830,7 +831,7 @@ describe('the operation decides on the configuration it validated', () => {
 
     aggregate.principalId = 'mallory';
 
-    expect((await pending).ok).toBe(true);
+    assert.strictEqual((await pending).ok, true);
   });
 
   test('mutating the signer list after the call does not change the candidates', async () => {
@@ -847,6 +848,6 @@ describe('the operation decides on the configuration it validated', () => {
 
     signers.length = 0;
 
-    expect((await pending).ok).toBe(true);
+    assert.strictEqual((await pending).ok, true);
   });
 });

@@ -7,7 +7,8 @@
  * policy, which is stricter than the RFCs.
  */
 
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import { computeThumbprint, toThumbprintUri } from '../../src/jwk/thumbprint.ts';
 import { verifyCompact } from '../../src/jws/verify.ts';
@@ -56,14 +57,15 @@ describe('RFC 7515 Appendix A.1 HMAC vector', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
       // The vector's header and payload carry literal CRLFs and interior
       // spacing, so reserializing either would change the signing input.
-      expect(new TextDecoder().decode(result.payload)).toBe(
+      assert.strictEqual(
+        new TextDecoder().decode(result.payload),
         '{"iss":"joe",\r\n "exp":1300819380,\r\n "http://example.com/is_root":true}',
       );
-      expect(result.isSharedSecret).toBe(true);
+      assert.strictEqual(result.isSharedSecret, true);
     }
   });
 
@@ -78,9 +80,9 @@ describe('RFC 7515 Appendix A.1 HMAC vector', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('signature_verification_failure');
+      assert.strictEqual(result.category, 'signature_verification_failure');
     }
   });
 });
@@ -103,7 +105,7 @@ describe('RFC 7638 Section 3.1 thumbprint vector', () => {
     // receive-only use; changing it would no longer be the published vector.
     const key = importJwk(RSA, 'RS256', 'verify', { receiveOnly: true });
 
-    expect(computeThumbprint(key)).toEqual({
+    assert.deepStrictEqual(computeThumbprint(key), {
       ok: true,
       thumbprint: 'NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs',
     });
@@ -114,7 +116,7 @@ describe('RFC 7638 Section 3.1 thumbprint vector', () => {
     const { alg: _alg, kid: _kid, ...required } = RSA;
     const withoutMetadata = importJwk(required, 'RS256', 'verify', { receiveOnly: true });
 
-    expect(computeThumbprint(withMetadata)).toEqual(computeThumbprint(withoutMetadata));
+    assert.deepStrictEqual(computeThumbprint(withMetadata), computeThumbprint(withoutMetadata));
   });
 });
 
@@ -122,10 +124,10 @@ describe('RFC 9278 thumbprint URI vector', () => {
   test('wraps the RFC 7638 digest in the published URI form', () => {
     const digest = 'NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs';
 
-    expect(toThumbprintUri(digest)).toMatchObject({
-      ok: true,
-      uri: `urn:ietf:params:oauth:jwk-thumbprint:sha-256:${digest}`,
-    });
+    const result = toThumbprintUri(digest);
+
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.uri, `urn:ietf:params:oauth:jwk-thumbprint:sha-256:${digest}`);
   });
 });
 
@@ -133,7 +135,7 @@ describe('project-owned oct thumbprint fixture', () => {
   test('pins the canonical member order for octet sequences', () => {
     const key = importJwk({ kty: 'oct', k: 'am9zZXN1aXRlLXRodW1icHJpbnQtZml4dHVyZS0zMmI' }, 'HS256', 'verify');
 
-    expect(computeThumbprint(key)).toEqual({
+    assert.deepStrictEqual(computeThumbprint(key), {
       ok: true,
       thumbprint: 'rKtDP-WPyAj7uvyhmS4zoFynXlUjVXdoqezCQ_8mM4U',
     });

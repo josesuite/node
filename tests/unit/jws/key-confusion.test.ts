@@ -6,7 +6,8 @@
  * rather than a code path that could be reached another way.
  */
 
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { createHmac, generateKeyPairSync } from 'node:crypto';
 
 import { signCompact } from '../../../src/jws/sign.ts';
@@ -49,10 +50,10 @@ describe('an asymmetric public key is not usable as a MAC secret', () => {
       operation: 'verify',
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('incompatible_key');
-      expect(result.reason).toBe('key_type_not_eligible_for_algorithm');
+      assert.strictEqual(result.category, 'incompatible_key');
+      assert.strictEqual(result.reason, 'key_type_not_eligible_for_algorithm');
     }
   });
 
@@ -63,9 +64,9 @@ describe('an asymmetric public key is not usable as a MAC secret', () => {
       operation: 'verify',
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('incompatible_key');
+      assert.strictEqual(result.category, 'incompatible_key');
     }
   });
 
@@ -86,11 +87,11 @@ describe('an asymmetric public key is not usable as a MAC secret', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('incompatible_key');
+      assert.strictEqual(result.category, 'incompatible_key');
       // Decided before any MAC is computed over attacker-chosen bytes.
-      expect(result.stage).toBe('key_resolution');
+      assert.strictEqual(result.stage, 'key_resolution');
     }
   });
 });
@@ -119,9 +120,9 @@ describe('a token cannot supply its own verification key', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('signature_verification_failure');
+      assert.strictEqual(result.category, 'signature_verification_failure');
     }
   });
 
@@ -147,9 +148,9 @@ describe('a token cannot supply its own verification key', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('signature_verification_failure');
+      assert.strictEqual(result.category, 'signature_verification_failure');
     }
   });
 });

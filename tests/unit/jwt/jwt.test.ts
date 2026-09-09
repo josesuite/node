@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { systemRandom } from '../../../src/internal/crypto/random.ts';
 import { generateKeyPairSync } from 'node:crypto';
 
@@ -156,9 +157,9 @@ describe('JWT profiles', () => {
       claims: CLAIMS,
       signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: invalidClock.signing },
     });
-    expect(clockResult.ok).toBe(false);
+    assert.strictEqual(clockResult.ok, false);
     if (!clockResult.ok) {
-      expect(clockResult.reason).toBe('trusted_clock_invalid');
+      assert.strictEqual(clockResult.reason, 'trusted_clock_invalid');
     }
 
     const oauth = oauthProfile();
@@ -171,9 +172,9 @@ describe('JWT profiles', () => {
       },
       { randomBytes: () => ({ ok: true, value: new Uint8Array(15) }) },
     );
-    expect(shortRandom.ok).toBe(false);
+    assert.strictEqual(shortRandom.ok, false);
     if (!shortRandom.ok) {
-      expect(shortRandom.reason).toBe('randomness_unavailable');
+      assert.strictEqual(shortRandom.reason, 'randomness_unavailable');
     }
 
     const normal = profile('project-jwt-v1');
@@ -183,9 +184,9 @@ describe('JWT profiles', () => {
       claims: CLAIMS,
       signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: normal.signing },
     });
-    expect(oversized.ok).toBe(false);
+    assert.strictEqual(oversized.ok, false);
     if (!oversized.ok) {
-      expect(oversized.reason).toBe('jwt_input_too_large');
+      assert.strictEqual(oversized.reason, 'jwt_input_too_large');
     }
   });
   test('creates and validates project-jwt-v1', async () => {
@@ -196,16 +197,16 @@ describe('JWT profiles', () => {
       claims: CLAIMS,
       signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: fixture.signing },
     });
-    expect(created.ok).toBe(true);
+    assert.strictEqual(created.ok, true);
     if (!created.ok) {
       return;
     }
 
     const validated = await validateJwt(created.token, { profile: fixture.profile, limits: LIMITS_V1 });
-    expect(validated.ok).toBe(true);
+    assert.strictEqual(validated.ok, true);
     if (validated.ok) {
-      expect(validated.value.validatedAt).toBe(1_000n);
-      expect(validated.value.issuer).toBe('https://issuer.example');
+      assert.strictEqual(validated.value.validatedAt, 1_000n);
+      assert.strictEqual(validated.value.issuer, 'https://issuer.example');
     }
   });
 
@@ -217,9 +218,9 @@ describe('JWT profiles', () => {
       claims: { ...CLAIMS, exp: 1_000 },
       signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: fixture.signing },
     });
-    expect(created.ok).toBe(false);
+    assert.strictEqual(created.ok, false);
     if (!created.ok) {
-      expect(created.category).toBe('expired_token');
+      assert.strictEqual(created.category, 'expired_token');
     }
   });
 
@@ -250,11 +251,11 @@ describe('JWT profiles', () => {
       validateJwt(created.token, { profile: fixture.profile, limits: LIMITS_V1 }),
       validateJwt(created.token, { profile: fixture.profile, limits: LIMITS_V1 }),
     ]);
-    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    assert.strictEqual(results.filter((result) => result.ok).length, 1);
     const rejected = results.find((result) => !result.ok);
-    expect(rejected?.ok).toBe(false);
+    assert.strictEqual(rejected?.ok, false);
     if (rejected && !rejected.ok) {
-      expect(rejected.category).toBe('replay_detected');
+      assert.strictEqual(rejected.category, 'replay_detected');
     }
   });
 
@@ -309,16 +310,16 @@ describe('JWT profiles', () => {
     }
     clockReads = 0;
     const validated = await validateJwt(created.token, { profile: configured.profile, limits: LIMITS_V1 });
-    expect(validated.ok).toBe(true);
-    expect(clockReads).toBe(1);
+    assert.strictEqual(validated.ok, true);
+    assert.strictEqual(clockReads, 1);
 
     const exhausted = await validateJwt(created.token, {
       profile: configured.profile,
       limits: lowerLimits({ cryptographicAttempts: 2 }),
     });
-    expect(exhausted.ok).toBe(false);
+    assert.strictEqual(exhausted.ok, false);
     if (!exhausted.ok) {
-      expect(exhausted.category).toBe('resource_limit');
+      assert.strictEqual(exhausted.category, 'resource_limit');
     }
   });
 
@@ -326,18 +327,18 @@ describe('JWT profiles', () => {
     const fixture = profile('project-jwt-v1');
     for (const token of ['a.b', 'a.b.c.d', 'a.b.c~disclosure', '{}']) {
       const result = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.stage).toBe('syntax');
+        assert.strictEqual(result.stage, 'syntax');
       }
     }
     const wrongType = await validateJwt(await signed(fixture, JSON.stringify(CLAIMS), 'other+jwt'), {
       profile: fixture.profile,
       limits: LIMITS_V1,
     });
-    expect(wrongType.ok).toBe(false);
+    assert.strictEqual(wrongType.ok, false);
     if (!wrongType.ok) {
-      expect(wrongType.category).toBe('token_type_mismatch');
+      assert.strictEqual(wrongType.category, 'token_type_mismatch');
     }
   });
 
@@ -355,13 +356,13 @@ describe('JWT profiles', () => {
       profile: fixture.profile,
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
       // The registered claims project to bigint; nested ones keep their lexeme.
-      expect(result.value.claims['exp']).toBe(1_100n);
+      assert.strictEqual(result.value.claims['exp'], 1_100n);
       const meta = result.value.claims['meta'] as Record<string, unknown>;
-      expect(meta['exp']).toEqual({ lexeme: '1.5' });
-      expect(meta['nbf']).toEqual({ lexeme: '1e3' });
+      assert.deepStrictEqual(meta['exp'], { lexeme: '1.5' });
+      assert.deepStrictEqual(meta['nbf'], { lexeme: '1e3' });
     }
   });
 
@@ -373,10 +374,10 @@ describe('JWT profiles', () => {
       profile: fixture.profile,
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('required_claim_missing_or_invalid');
-      expect(result.category).not.toBe('token_type_mismatch');
+      assert.strictEqual(result.reason, 'required_claim_missing_or_invalid');
+      assert.notStrictEqual(result.category, 'token_type_mismatch');
     }
   });
 
@@ -389,9 +390,9 @@ describe('JWT profiles', () => {
         profile: fixture.profile,
         limits: LIMITS_V1,
       });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('string_or_uri_invalid');
+        assert.strictEqual(result.reason, 'string_or_uri_invalid');
       }
     }
   });
@@ -405,7 +406,7 @@ describe('JWT profiles', () => {
         profile: fixture.profile,
         limits: LIMITS_V1,
       });
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
     }
   });
 
@@ -416,9 +417,9 @@ describe('JWT profiles', () => {
         profile: fixture.profile,
         limits: LIMITS_V1,
       });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.stage).toBe('claims_syntax');
+        assert.strictEqual(result.stage, 'claims_syntax');
       }
     }
   });
@@ -431,9 +432,9 @@ describe('JWT profiles', () => {
         profile: fixture.profile,
         limits: LIMITS_V1,
       });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.category).toBe('claim_validation_failure');
+        assert.strictEqual(result.category, 'claim_validation_failure');
       }
     }
   });
@@ -451,9 +452,9 @@ describe('JWT profiles', () => {
         profile: fixture.profile,
         limits: LIMITS_V1,
       });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.category).toBe(category);
+        assert.strictEqual(result.category, category);
       }
     }
   });
@@ -468,8 +469,8 @@ describe('JWT profiles', () => {
     });
     const token = await signed(fixture, JSON.stringify({ ...CLAIMS, aud: 'other', jti: 'unused' }));
     const result = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
-    expect(result.ok).toBe(false);
-    expect(calls).toBe(0);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(calls, 0);
   });
 
   test('fails closed when replay storage is unavailable and retains through exp plus skew', async () => {
@@ -484,22 +485,22 @@ describe('JWT profiles', () => {
       profile: unavailable.profile,
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('backend_failure');
+      assert.strictEqual(result.category, 'backend_failure');
     }
-    expect(retainUntil).toBe(1_100n);
+    assert.strictEqual(retainUntil, 1_100n);
   });
 
   test('returns a deeply immutable claims view without converting unknown decimals', async () => {
     const fixture = profile('project-jwt-v1');
     const token = await signed(fixture, JSON.stringify({ ...CLAIMS, extension: { ratio: 1.5 } }));
     const result = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(Object.isFrozen(result.value.claims)).toBe(true);
-      expect(Object.isFrozen(result.value.claims['extension'])).toBe(true);
-      expect(result.value.claims['exp']).toBe(1_100n);
+      assert.strictEqual(Object.isFrozen(result.value.claims), true);
+      assert.strictEqual(Object.isFrozen(result.value.claims['extension']), true);
+      assert.strictEqual(result.value.claims['exp'], 1_100n);
     }
   });
 });
@@ -515,16 +516,16 @@ describe('OAuth access-token JWT profile', () => {
       claims,
       signing: { policy: AlgorithmPolicy.create('jws', ['RS256'], 'create'), key: fixture.signing },
     });
-    expect(created.ok).toBe(true);
+    assert.strictEqual(created.ok, true);
     if (!created.ok) {
       return;
     }
 
     const validated = await validateJwt(created.token, { profile: fixture.profile, limits: LIMITS_V1 });
-    expect(validated.ok).toBe(true);
+    assert.strictEqual(validated.ok, true);
     if (validated.ok) {
-      expect(validated.value.profile).toBe('oauth-at-jwt-v1');
-      expect(validated.value.claims['client_id']).toBe('client-123');
+      assert.strictEqual(validated.value.profile, 'oauth-at-jwt-v1');
+      assert.strictEqual(validated.value.claims['client_id'], 'client-123');
     }
   });
 
@@ -546,14 +547,15 @@ describe('OAuth access-token JWT profile', () => {
       },
     };
 
-    expect(createJwtProfile({ ...base, type: 'application/other+jwt' }).ok).toBe(false);
-    expect(createJwtProfile({ ...base, maximumLifetime: undefined }).ok).toBe(false);
-    expect(
+    assert.strictEqual(createJwtProfile({ ...base, type: 'application/other+jwt' }).ok, false);
+    assert.strictEqual(createJwtProfile({ ...base, maximumLifetime: undefined }).ok, false);
+    assert.strictEqual(
       createJwtProfile({
         ...base,
         verification: { ...base.verification, policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive') },
       }).ok,
-    ).toBe(false);
+      false,
+    );
   });
 
   test('requires client_id and jti and validates scope syntax', async () => {
@@ -566,9 +568,9 @@ describe('OAuth access-token JWT profile', () => {
     ]) {
       const token = await signed(fixture, JSON.stringify(invalid), 'APPLICATION/AT+JWT');
       const result = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.stage).toBe('claims_semantics');
+        assert.strictEqual(result.stage, 'claims_semantics');
       }
     }
   });
@@ -585,9 +587,9 @@ describe('OAuth access-token JWT profile', () => {
       throw new Error(created.reason);
     }
     const validated = await validateJwt(created.token, { profile: fixture.profile, limits: LIMITS_V1 });
-    expect(validated.ok).toBe(true);
+    assert.strictEqual(validated.ok, true);
     if (validated.ok) {
-      expect(Buffer.from(validated.value.claims['jti'] as string, 'base64url')).toHaveLength(16);
+      assert.strictEqual(Buffer.from(validated.value.claims['jti'] as string, 'base64url').length, 16);
     }
   });
 });
@@ -603,10 +605,10 @@ describe('claim size limits', () => {
 
     const result = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
-      expect(result.reason).toBe('jti_too_long');
+      assert.strictEqual(result.category, 'resource_limit');
+      assert.strictEqual(result.reason, 'jti_too_long');
     }
   });
 
@@ -614,7 +616,7 @@ describe('claim size limits', () => {
     const fixture = profile('project-jwt-v1');
     const token = await signed(fixture, JSON.stringify({ ...CLAIMS, jti: 'a'.repeat(LIMITS_V1.jti) }));
 
-    expect((await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 })).ok).toBe(true);
+    assert.strictEqual((await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 })).ok, true);
   });
 });
 
@@ -629,7 +631,7 @@ describe('audience matching across both permitted encodings', () => {
     const fixture = profile('project-jwt-v1');
 
     for (const aud of ['api', ['api'], ['api', 'other'], ['other', 'api']]) {
-      expect((await validateWithAudience(fixture, aud)).ok).toBe(true);
+      assert.strictEqual((await validateWithAudience(fixture, aud)).ok, true);
     }
   });
 
@@ -638,9 +640,9 @@ describe('audience matching across both permitted encodings', () => {
 
     for (const aud of ['other', ['other'], ['other', 'third']]) {
       const result = await validateWithAudience(fixture, aud);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.category).toBe('audience_mismatch');
+        assert.strictEqual(result.category, 'audience_mismatch');
       }
     }
   });
@@ -652,10 +654,10 @@ describe('audience matching across both permitted encodings', () => {
 
     for (const aud of [[], ['api', 'api'], ['api', 1], ['api', ''], [['api']], 1, null, {}]) {
       const result = await validateWithAudience(fixture, aud);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.category).toBe('claim_validation_failure');
-        expect(result.reason).toBe('required_claim_missing_or_invalid');
+        assert.strictEqual(result.category, 'claim_validation_failure');
+        assert.strictEqual(result.reason, 'required_claim_missing_or_invalid');
       }
     }
   });

@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import {
   composeNonce,
@@ -13,9 +14,9 @@ describe('nonce composition', () => {
   test('produces 96 bits from a writer identifier and a counter', () => {
     const nonce = composeNonce(1, 2n);
 
-    expect(nonce).toBeDefined();
-    expect(nonce!.length).toBe(GCM_NONCE_BYTES);
-    expect([...nonce!]).toEqual([0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
+    assert.notStrictEqual(nonce, undefined);
+    assert.strictEqual(nonce!.length, GCM_NONCE_BYTES);
+    assert.deepStrictEqual([...nonce!], [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2]);
   });
 
   test('never repeats across distinct writers at the same counter', () => {
@@ -26,7 +27,7 @@ describe('nonce composition', () => {
       const nonce = composeNonce(writer, 7n);
       seen.add(Buffer.from(nonce!).toString('hex'));
     }
-    expect(seen.size).toBe(64);
+    assert.strictEqual(seen.size, 64);
   });
 
   test('never repeats across successive counters for one writer', () => {
@@ -35,22 +36,22 @@ describe('nonce composition', () => {
       const nonce = composeNonce(9, counter);
       seen.add(Buffer.from(nonce!).toString('hex'));
     }
-    expect(seen.size).toBe(64);
+    assert.strictEqual(seen.size, 64);
   });
 
   test('accepts the full range of both fields', () => {
-    expect(composeNonce(0, 0n)).toBeDefined();
-    expect(composeNonce(0xffff_ffff, 0xffff_ffff_ffff_ffffn)).toBeDefined();
+    assert.notStrictEqual(composeNonce(0, 0n), undefined);
+    assert.notStrictEqual(composeNonce(0xffff_ffff, 0xffff_ffff_ffff_ffffn), undefined);
   });
 
   test('refuses values that would not fit their field', () => {
     // A silently truncated writer identifier would alias two writers onto one
     // nonce space, which is exactly the collision the split prevents.
-    expect(composeNonce(-1, 0n)).toBeUndefined();
-    expect(composeNonce(0x1_0000_0000, 0n)).toBeUndefined();
-    expect(composeNonce(1.5, 0n)).toBeUndefined();
-    expect(composeNonce(0, -1n)).toBeUndefined();
-    expect(composeNonce(0, 0x1_0000_0000_0000_0000n)).toBeUndefined();
+    assert.strictEqual(composeNonce(-1, 0n), undefined);
+    assert.strictEqual(composeNonce(0x1_0000_0000, 0n), undefined);
+    assert.strictEqual(composeNonce(1.5, 0n), undefined);
+    assert.strictEqual(composeNonce(0, -1n), undefined);
+    assert.strictEqual(composeNonce(0, 0x1_0000_0000_0000_0000n), undefined);
   });
 });
 
@@ -58,16 +59,16 @@ describe('creation cap', () => {
   test('stops far below the construction ceiling', () => {
     // The cap leaves several orders of magnitude of headroom under the 2^32
     // invocation limit so an accounting error is not immediately fatal.
-    expect(MAX_CREATIONS_PER_KEY).toBe(2 ** 24);
-    expect(MAX_CREATIONS_PER_KEY).toBeLessThan(2 ** 32);
+    assert.strictEqual(MAX_CREATIONS_PER_KEY, 2 ** 24);
+    assert.ok(MAX_CREATIONS_PER_KEY < 2 ** 32);
   });
 });
 
 describe('failure mapping', () => {
   test('separates a store outage from a state problem', () => {
-    expect(nonceFailureCategory('unavailable')).toBe('backend_failure');
-    expect(nonceFailureCategory('exhausted')).toBe('policy_violation');
-    expect(nonceFailureCategory('state_uncertain')).toBe('policy_violation');
+    assert.strictEqual(nonceFailureCategory('unavailable'), 'backend_failure');
+    assert.strictEqual(nonceFailureCategory('exhausted'), 'policy_violation');
+    assert.strictEqual(nonceFailureCategory('state_uncertain'), 'policy_violation');
   });
 });
 
@@ -96,13 +97,13 @@ describe('allocator contract', () => {
 
     for (let i = 0; i < 100; i += 1) {
       const result = await allocator.reserve('key-a');
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (result.ok) {
         seen.add(Buffer.from(result.reservation.nonce).toString('hex'));
       }
     }
 
-    expect(seen.size).toBe(100);
+    assert.strictEqual(seen.size, 100);
   });
 
   test('keeps separate keys in separate nonce spaces', async () => {
@@ -112,9 +113,9 @@ describe('allocator contract', () => {
 
     const a = await allocator.reserve('key-a');
     const b = await allocator.reserve('key-b');
-    expect(a.ok && b.ok).toBe(true);
+    assert.strictEqual(a.ok && b.ok, true);
     if (a.ok && b.ok) {
-      expect(a.reservation.nonce).toEqual(b.reservation.nonce);
+      assert.deepStrictEqual(a.reservation.nonce, b.reservation.nonce);
     }
   });
 
@@ -126,9 +127,9 @@ describe('allocator contract', () => {
     const first = await allocator.reserve('key-a');
     const second = await allocator.reserve('key-a');
 
-    expect(first.ok && second.ok).toBe(true);
+    assert.strictEqual(first.ok && second.ok, true);
     if (first.ok && second.ok) {
-      expect(first.reservation.nonce).not.toEqual(second.reservation.nonce);
+      assert.notDeepStrictEqual(first.reservation.nonce, second.reservation.nonce);
     }
   });
 
@@ -138,10 +139,10 @@ describe('allocator contract', () => {
     };
 
     const result = await exhausted.reserve('key-a');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.failure).toBe('exhausted');
-      expect(nonceFailureCategory(result.failure)).toBe('policy_violation');
+      assert.strictEqual(result.failure, 'exhausted');
+      assert.strictEqual(nonceFailureCategory(result.failure), 'policy_violation');
     }
   });
 
@@ -151,13 +152,13 @@ describe('allocator contract', () => {
     const module = (await import('../../../src/jwe/nonce.ts')) as Record<string, unknown>;
     const exported = Object.keys(module);
 
-    expect(exported).not.toContain('memoryNonceAllocator');
-    expect(exported.filter((name) => name.toLowerCase().includes('default'))).toHaveLength(0);
+    assert.ok(!exported.includes('memoryNonceAllocator'));
+    assert.strictEqual(exported.filter((name) => name.toLowerCase().includes('default')).length, 0);
     for (const name of exported) {
       const value = module[name];
       // Only pure helpers and constants are exported; anything holding state
       // would be an allocator in disguise.
-      expect(typeof value === 'function' || typeof value === 'number').toBe(true);
+      assert.strictEqual(typeof value === 'function' || typeof value === 'number', true);
     }
   });
 });

@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 
 import { contentEncryptionShape } from '../../../src/algorithms/content-encryption/index.ts';
@@ -31,9 +32,9 @@ describe('direct key agreement', () => {
       const configured = new Uint8Array(randomBytes(size));
 
       const result = directCek(algorithm, configured);
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (result.ok) {
-        expect(result.cek).toEqual(configured);
+        assert.deepStrictEqual(result.cek, configured);
       }
     }
   });
@@ -45,18 +46,18 @@ describe('direct key agreement', () => {
 
     for (const size of [shape.cekBytes - 1, shape.cekBytes + 1, 0, 32]) {
       const result = directCek('A128GCM', new Uint8Array(size));
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('key_size_mismatch');
+        assert.strictEqual(result.reason, 'key_size_mismatch');
       }
     }
   });
 
   test('refuses an unknown content algorithm', () => {
     const result = directCek('A128CBC', new Uint8Array(32));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('unsupported_enc');
+      assert.strictEqual(result.reason, 'unsupported_enc');
     }
   });
 });
@@ -65,14 +66,14 @@ describe('AES key wrapping', () => {
   const ALGORITHMS = ['A128KW', 'A192KW', 'A256KW'] as const;
 
   test('requires the exact KEK size per identifier', () => {
-    expect(aesKwKeySize('A128KW')).toBe(16);
-    expect(aesKwKeySize('A192KW')).toBe(24);
-    expect(aesKwKeySize('A256KW')).toBe(32);
-    expect(aesKwKeySize('A128GCMKW')).toBeUndefined();
+    assert.strictEqual(aesKwKeySize('A128KW'), 16);
+    assert.strictEqual(aesKwKeySize('A192KW'), 24);
+    assert.strictEqual(aesKwKeySize('A256KW'), 32);
+    assert.strictEqual(aesKwKeySize('A128GCMKW'), undefined);
   });
 
   test('uses the specified default integrity value', () => {
-    expect([...defaultIntegrityValue()]).toEqual([0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6]);
+    assert.deepStrictEqual([...defaultIntegrityValue()], [0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6]);
   });
 
   test('matches the published RFC 3394 vectors', async () => {
@@ -111,15 +112,15 @@ describe('AES key wrapping', () => {
       const cek = new Uint8Array(Buffer.from(cekHex, 'hex'));
 
       const wrapped = await wrapAesKw(algorithm, kek, cek);
-      expect(wrapped.ok).toBe(true);
+      assert.strictEqual(wrapped.ok, true);
       if (wrapped.ok) {
-        expect(Buffer.from(wrapped.value).toString('hex').toUpperCase()).toBe(expectedHex);
+        assert.strictEqual(Buffer.from(wrapped.value).toString('hex').toUpperCase(), expectedHex);
       }
 
       const unwrapped = await unwrapAesKw(algorithm, kek, new Uint8Array(Buffer.from(expectedHex, 'hex')));
-      expect(unwrapped.ok).toBe(true);
+      assert.strictEqual(unwrapped.ok, true);
       if (unwrapped.ok) {
-        expect(unwrapped.value).toEqual(cek);
+        assert.deepStrictEqual(unwrapped.value, cek);
       }
     }
   });
@@ -130,16 +131,16 @@ describe('AES key wrapping', () => {
       const cek = new Uint8Array(randomBytes(32));
 
       const wrapped = await wrapAesKw(algorithm, kek, cek);
-      expect(wrapped.ok).toBe(true);
+      assert.strictEqual(wrapped.ok, true);
       if (!wrapped.ok) {
         return;
       }
-      expect(wrapped.value.length).toBe(cek.length + KW_OVERHEAD_BYTES);
+      assert.strictEqual(wrapped.value.length, cek.length + KW_OVERHEAD_BYTES);
 
       const unwrapped = await unwrapAesKw(algorithm, kek, wrapped.value);
-      expect(unwrapped.ok).toBe(true);
+      assert.strictEqual(unwrapped.ok, true);
       if (unwrapped.ok) {
-        expect(unwrapped.value).toEqual(cek);
+        assert.deepStrictEqual(unwrapped.value, cek);
       }
     });
 
@@ -154,9 +155,9 @@ describe('AES key wrapping', () => {
       const unwrapped = await unwrapAesKw(algorithm, other, wrapped.value);
       // The integrity check is what catches this, and it is an authentication
       // outcome rather than a provider fault.
-      expect(unwrapped.ok).toBe(true);
+      assert.strictEqual(unwrapped.ok, true);
       if (unwrapped.ok) {
-        expect(unwrapped.value).toBeUndefined();
+        assert.strictEqual(unwrapped.value, undefined);
       }
     });
 
@@ -171,9 +172,9 @@ describe('AES key wrapping', () => {
         const modified = flipBit(wrapped.value, index);
 
         const unwrapped = await unwrapAesKw(algorithm, kek, modified);
-        expect(unwrapped.ok).toBe(true);
+        assert.strictEqual(unwrapped.ok, true);
         if (unwrapped.ok) {
-          expect(unwrapped.value).toBeUndefined();
+          assert.strictEqual(unwrapped.value, undefined);
         }
       }
     });
@@ -184,9 +185,9 @@ describe('AES key wrapping', () => {
 
       for (const wrong of [size - 1, size + 1]) {
         const result = await wrapAesKw(algorithm, new Uint8Array(wrong), cek);
-        expect(result.ok).toBe(false);
+        assert.strictEqual(result.ok, false);
         if (!result.ok) {
-          expect(result.failure).toBe('operation_failed');
+          assert.strictEqual(result.failure, 'operation_failed');
         }
       }
     });
@@ -199,9 +200,9 @@ describe('AES key wrapping', () => {
       const size = contentEncryptionShape(enc)!.cekBytes;
       const wrapped = await wrapAesKw('A256KW', kek, new Uint8Array(randomBytes(size)));
 
-      expect(wrapped.ok).toBe(true);
+      assert.strictEqual(wrapped.ok, true);
       if (wrapped.ok) {
-        expect(wrapped.value.length).toBe(size + KW_OVERHEAD_BYTES);
+        assert.strictEqual(wrapped.value.length, size + KW_OVERHEAD_BYTES);
       }
     }
   });
@@ -211,7 +212,7 @@ describe('AES key wrapping', () => {
 
     for (const size of [0, 8, 15, 17, 20]) {
       const result = await wrapAesKw('A256KW', kek, new Uint8Array(size));
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
     }
   });
 
@@ -220,18 +221,18 @@ describe('AES key wrapping', () => {
 
     for (const size of [0, 8, 16, 23, 25]) {
       const result = await unwrapAesKw('A256KW', kek, new Uint8Array(size));
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (result.ok) {
-        expect(result.value).toBeUndefined();
+        assert.strictEqual(result.value, undefined);
       }
     }
   });
 
   test('reports an unsupported identifier separately from a failed unwrap', async () => {
     const result = await unwrapAesKw('A128GCMKW', new Uint8Array(16), new Uint8Array(40));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.failure).toBe('unsupported');
+      assert.strictEqual(result.failure, 'unsupported');
     }
   });
 });
@@ -254,12 +255,12 @@ describe('RSAES-OAEP', () => {
   }
 
   test('fixes the hash from the identifier', () => {
-    expect(oaepHash('RSA-OAEP-256')).toBe('SHA-256');
+    assert.strictEqual(oaepHash('RSA-OAEP-256'), 'SHA-256');
     // The SHA-1 variant is receive-only, which the registry enforces; here only
     // the hash binding is asserted.
-    expect(oaepHash('RSA-OAEP')).toBe('SHA-1');
-    expect(oaepHash('RSA-OAEP-384')).toBeUndefined();
-    expect(oaepHash('RSA1_5')).toBeUndefined();
+    assert.strictEqual(oaepHash('RSA-OAEP'), 'SHA-1');
+    assert.strictEqual(oaepHash('RSA-OAEP-384'), undefined);
+    assert.strictEqual(oaepHash('RSA1_5'), undefined);
   });
 
   test('round-trips a CEK under RSA-OAEP-256', async () => {
@@ -267,17 +268,17 @@ describe('RSAES-OAEP', () => {
     const cek = new Uint8Array(randomBytes(32));
 
     const encrypted = await encryptRsaOaep('RSA-OAEP-256', key, cek);
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
     // The ciphertext is exactly one modulus wide.
-    expect(encrypted.value.length).toBe(key.n.length);
+    assert.strictEqual(encrypted.value.length, key.n.length);
 
     const decrypted = await decryptRsaOaep('RSA-OAEP-256', key, encrypted.value);
-    expect(decrypted.ok).toBe(true);
+    assert.strictEqual(decrypted.ok, true);
     if (decrypted.ok) {
-      expect(decrypted.value).toEqual(cek);
+      assert.deepStrictEqual(decrypted.value, cek);
     }
   });
 
@@ -290,9 +291,9 @@ describe('RSAES-OAEP', () => {
     }
 
     const decrypted = await decryptRsaOaep('RSA-OAEP-256', other, encrypted.value);
-    expect(decrypted.ok).toBe(true);
+    assert.strictEqual(decrypted.ok, true);
     if (decrypted.ok) {
-      expect(decrypted.value).toBeUndefined();
+      assert.strictEqual(decrypted.value, undefined);
     }
   });
 
@@ -306,9 +307,9 @@ describe('RSAES-OAEP', () => {
     }
 
     const decrypted = await decryptRsaOaep('RSA-OAEP', key, encrypted.value);
-    expect(decrypted.ok).toBe(true);
+    assert.strictEqual(decrypted.ok, true);
     if (decrypted.ok) {
-      expect(decrypted.value).toBeUndefined();
+      assert.strictEqual(decrypted.value, undefined);
     }
   });
 
@@ -324,9 +325,9 @@ describe('RSAES-OAEP', () => {
     const modified = flipBit(encrypted.value, encrypted.value.length - 1);
 
     const decrypted = await decryptRsaOaep('RSA-OAEP-256', key, modified);
-    expect(decrypted.ok).toBe(true);
+    assert.strictEqual(decrypted.ok, true);
     if (decrypted.ok) {
-      expect(decrypted.value).toBeUndefined();
+      assert.strictEqual(decrypted.value, undefined);
     }
   });
 
@@ -335,9 +336,9 @@ describe('RSAES-OAEP', () => {
 
     for (const length of [key.n.length - 1, key.n.length + 1, 0]) {
       const decrypted = await decryptRsaOaep('RSA-OAEP-256', key, new Uint8Array(length));
-      expect(decrypted.ok).toBe(true);
+      assert.strictEqual(decrypted.ok, true);
       if (decrypted.ok) {
-        expect(decrypted.value).toBeUndefined();
+        assert.strictEqual(decrypted.value, undefined);
       }
     }
   });
@@ -346,9 +347,9 @@ describe('RSAES-OAEP', () => {
     const key = rsaMaterial();
     const result = await encryptRsaOaep('RSA-OAEP-512', key, new Uint8Array(32));
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.failure).toBe('unsupported');
+      assert.strictEqual(result.failure, 'unsupported');
     }
   });
 });
@@ -373,11 +374,11 @@ describe('ECDH-ES agreement', () => {
 
   test('recognises only agreement curves', () => {
     for (const curve of ['P-256', 'P-384', 'P-521', 'X25519', 'X448']) {
-      expect(isAgreementCurve(curve)).toBe(true);
+      assert.strictEqual(isAgreementCurve(curve), true);
     }
     // Signing curves are never silently reused for agreement.
     for (const curve of ['Ed25519', 'Ed448', 'secp256k1']) {
-      expect(isAgreementCurve(curve)).toBe(false);
+      assert.strictEqual(isAgreementCurve(curve), false);
     }
   });
 
@@ -385,7 +386,7 @@ describe('ECDH-ES agreement', () => {
     test(`${curve} produces the same secret for both parties`, async () => {
       const recipient = ecMaterial(curve);
       const ephemeral = await generateEphemeralEc(curve);
-      expect(ephemeral.ok).toBe(true);
+      assert.strictEqual(ephemeral.ok, true);
       if (!ephemeral.ok) {
         return;
       }
@@ -396,10 +397,10 @@ describe('ECDH-ES agreement', () => {
       );
       const recipientSide = await agree(recipient, { curve, x: ephemeral.value.x, y: ephemeral.value.y });
 
-      expect(senderSide.ok && recipientSide.ok).toBe(true);
+      assert.strictEqual(senderSide.ok && recipientSide.ok, true);
       if (senderSide.ok && recipientSide.ok) {
-        expect(senderSide.value).toEqual(recipientSide.value);
-        expect(senderSide.value.length).toBe(agreementFieldBytes(curve)!);
+        assert.deepStrictEqual(senderSide.value, recipientSide.value);
+        assert.strictEqual(senderSide.value.length, agreementFieldBytes(curve)!);
       }
     });
 
@@ -409,10 +410,10 @@ describe('ECDH-ES agreement', () => {
       const first = await generateEphemeralEc(curve);
       const second = await generateEphemeralEc(curve);
 
-      expect(first.ok && second.ok).toBe(true);
+      assert.strictEqual(first.ok && second.ok, true);
       if (first.ok && second.ok) {
-        expect(first.value.d).not.toEqual(second.value.d);
-        expect(first.value.x).not.toEqual(second.value.x);
+        assert.notDeepStrictEqual(first.value.d, second.value.d);
+        assert.notDeepStrictEqual(first.value.x, second.value.x);
       }
     });
 
@@ -421,7 +422,7 @@ describe('ECDH-ES agreement', () => {
       const offCurve = flipBit(recipient.x, 0, 0xff);
 
       const result = await agree(recipient, { curve, x: offCurve, y: recipient.y });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
     });
 
     test(`${curve} refuses to agree across curves`, async () => {
@@ -430,7 +431,7 @@ describe('ECDH-ES agreement', () => {
       const peer = ecMaterial(other);
 
       const result = await agree(recipient, { curve: other, x: peer.x, y: peer.y });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
     });
   }
 
@@ -438,7 +439,7 @@ describe('ECDH-ES agreement', () => {
     test(`${curve} produces the same secret for both parties`, async () => {
       const recipient = okpMaterial(curve);
       const ephemeral = await generateEphemeralOkp(curve);
-      expect(ephemeral.ok).toBe(true);
+      assert.strictEqual(ephemeral.ok, true);
       if (!ephemeral.ok) {
         return;
       }
@@ -449,10 +450,10 @@ describe('ECDH-ES agreement', () => {
       });
       const recipientSide = await agree(recipient, { curve, x: ephemeral.value.x });
 
-      expect(senderSide.ok && recipientSide.ok).toBe(true);
+      assert.strictEqual(senderSide.ok && recipientSide.ok, true);
       if (senderSide.ok && recipientSide.ok) {
-        expect(senderSide.value).toEqual(recipientSide.value);
-        expect(senderSide.value.length).toBe(agreementFieldBytes(curve)!);
+        assert.deepStrictEqual(senderSide.value, recipientSide.value);
+        assert.strictEqual(senderSide.value.length, agreementFieldBytes(curve)!);
       }
     });
 
@@ -463,7 +464,7 @@ describe('ECDH-ES agreement', () => {
       const lowOrder = new Uint8Array(recipient.x.length);
 
       const result = await agree(recipient, { curve, x: lowOrder });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
     });
   }
 
@@ -472,14 +473,14 @@ describe('ECDH-ES agreement', () => {
     const publicOnly: EcMaterial = { ...recipient, d: undefined };
 
     const result = await agree(publicOnly, { curve: 'P-256', x: recipient.x, y: recipient.y });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
   });
 
   test('refuses an EC peer point missing its Y coordinate', async () => {
     const recipient = ecMaterial('P-256');
 
     const result = await agree(recipient, { curve: 'P-256', x: recipient.x });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
   });
 
   test('derives different CEKs for direct and wrapped agreement', async () => {
@@ -511,6 +512,6 @@ describe('ECDH-ES agreement', () => {
       keyBytes: 16,
     });
 
-    expect(direct).not.toEqual(wrapped);
+    assert.notDeepStrictEqual(direct, wrapped);
   });
 });

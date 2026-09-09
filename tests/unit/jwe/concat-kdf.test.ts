@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { createHash } from 'node:crypto';
 
 import { concatKdf, partyInfo } from '../../../src/algorithms/jwe/concat-kdf.ts';
@@ -26,7 +27,7 @@ describe('published test vector', () => {
       keyBytes: 16,
     });
 
-    expect([...derived]).toEqual([86, 170, 141, 234, 248, 35, 109, 32, 92, 34, 40, 205, 113, 167, 16, 26]);
+    assert.deepStrictEqual([...derived], [86, 170, 141, 234, 248, 35, 109, 32, 92, 34, 40, 205, 113, 167, 16, 26]);
   });
 });
 
@@ -46,8 +47,8 @@ describe('encoding invariants', () => {
   test('binds the algorithm identifier', () => {
     // Direct agreement feeds `enc` and wrapped agreement feeds `alg`; deriving
     // the same key for both would let one be substituted for the other.
-    expect(derive({ algorithmId: ascii('A128GCM') })).not.toEqual(derive({ algorithmId: ascii('A128KW') }));
-    expect(derive({ algorithmId: ascii('A128GCM') })).not.toEqual(derive({ algorithmId: ascii('A256GCM') }));
+    assert.notDeepStrictEqual(derive({ algorithmId: ascii('A128GCM') }), derive({ algorithmId: ascii('A128KW') }));
+    assert.notDeepStrictEqual(derive({ algorithmId: ascii('A128GCM') }), derive({ algorithmId: ascii('A256GCM') }));
   });
 
   test('binds the requested key length', () => {
@@ -56,7 +57,7 @@ describe('encoding invariants', () => {
 
     // The length enters the hash, so the shorter key is not a prefix of the
     // longer one. A KDF that merely truncated would leak one from the other.
-    expect([...long.subarray(0, 16)]).not.toEqual([...short]);
+    assert.notDeepStrictEqual([...long.subarray(0, 16)], [...short]);
   });
 
   test('separates party fields rather than concatenating them', () => {
@@ -65,14 +66,14 @@ describe('encoding invariants', () => {
     const split = derive({ partyUInfo: ascii('AB'), partyVInfo: ascii('CD') });
     const shifted = derive({ partyUInfo: ascii('ABC'), partyVInfo: ascii('D') });
 
-    expect(split).not.toEqual(shifted);
+    assert.notDeepStrictEqual(split, shifted);
   });
 
   test('treats an absent party field as empty', () => {
-    expect(partyInfo(undefined)).toEqual(new Uint8Array(0));
-    expect(partyInfo(ascii('x'))).toEqual(ascii('x'));
+    assert.deepStrictEqual(partyInfo(undefined), new Uint8Array(0));
+    assert.deepStrictEqual(partyInfo(ascii('x')), ascii('x'));
 
-    expect(derive({ partyUInfo: partyInfo(undefined) })).toEqual(derive({ partyUInfo: new Uint8Array(0) }));
+    assert.deepStrictEqual(derive({ partyUInfo: partyInfo(undefined) }), derive({ partyUInfo: new Uint8Array(0) }));
   });
 
   test('binds the shared secret including leading zeros', () => {
@@ -89,7 +90,7 @@ describe('encoding invariants', () => {
       partyVInfo: new Uint8Array(0),
       keyBytes: 16,
     };
-    expect(concatKdf(leadingZero, input)).not.toEqual(concatKdf(stripped, input));
+    assert.notDeepStrictEqual(concatKdf(leadingZero, input), concatKdf(stripped, input));
   });
 });
 
@@ -100,8 +101,8 @@ describe('multi-round derivation', () => {
   test('produces the exact requested length past one hash block', () => {
     for (const keyBytes of [16, 24, 32, 33, 48, 64]) {
       const key = concatKdf(Z, { ...base, keyBytes });
-      expect(key.length).toBe(keyBytes);
-      expect(key.buffer.byteLength).toBe(keyBytes);
+      assert.strictEqual(key.length, keyBytes);
+      assert.strictEqual(key.buffer.byteLength, keyBytes);
     }
   });
 
@@ -111,7 +112,7 @@ describe('multi-round derivation', () => {
     // mean the counter never moved.
     const derived = concatKdf(Z, { ...base, keyBytes: 64 });
 
-    expect([...derived.subarray(0, 32)]).not.toEqual([...derived.subarray(32)]);
+    assert.notDeepStrictEqual([...derived.subarray(0, 32)], [...derived.subarray(32)]);
   });
 
   test('concatenates rounds and truncates the last one', () => {
@@ -137,6 +138,6 @@ describe('multi-round derivation', () => {
       ),
     ).subarray(0, keyBytes);
 
-    expect([...concatKdf(Z, { ...base, keyBytes })]).toEqual([...expected]);
+    assert.deepStrictEqual([...concatKdf(Z, { ...base, keyBytes })], [...expected]);
   });
 });

@@ -6,7 +6,8 @@
  * specification.
  */
 
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { generateKeyPairSync, sign as nodeSign } from 'node:crypto';
 
 import { ecdsaSignatureBytes, verifyEcdsa } from '../../../src/algorithms/jws/ecdsa.ts';
@@ -40,20 +41,20 @@ describe('ECDSA accepts only fixed-width R || S', () => {
     test(`${algorithm} rejects a DER-encoded signature over the same input`, async () => {
       const { privateKey, publicJwk } = keyPair(curve);
       const der = new Uint8Array(nodeSign(hash, SIGNING_INPUT, { key: privateKey, dsaEncoding: 'der' }));
-      expect(der.length).not.toBe(ecdsaSignatureBytes(algorithm));
+      assert.notStrictEqual(der.length, ecdsaSignatureBytes(algorithm));
 
       const result = await verifyEcdsa(algorithm, publicJwk, SIGNING_INPUT, der);
 
       // A rejection rather than a backend failure: the key and provider are
       // usable and only the signature is unacceptable.
-      expect(result).toEqual({ ok: true, value: false });
+      assert.deepStrictEqual(result, { ok: true, value: false });
     });
 
     test(`${algorithm} rejects a signature padded or truncated to another width`, async () => {
       const { privateKey, publicJwk } = keyPair(curve);
       const raw = new Uint8Array(nodeSign(hash, SIGNING_INPUT, { key: privateKey, dsaEncoding: 'ieee-p1363' }));
       const width = ecdsaSignatureBytes(algorithm)!;
-      expect(raw.length).toBe(width);
+      assert.strictEqual(raw.length, width);
 
       // Leading zeros are significant at a fixed width, so a widened signature
       // denotes different scalars rather than the same ones.
@@ -61,7 +62,10 @@ describe('ECDSA accepts only fixed-width R || S', () => {
       padded.set(raw, 2);
 
       for (const candidate of [padded, raw.subarray(0, width - 1), raw.subarray(1)]) {
-        expect(await verifyEcdsa(algorithm, publicJwk, SIGNING_INPUT, candidate)).toEqual({ ok: true, value: false });
+        assert.deepStrictEqual(await verifyEcdsa(algorithm, publicJwk, SIGNING_INPUT, candidate), {
+          ok: true,
+          value: false,
+        });
       }
     });
 
@@ -77,7 +81,10 @@ describe('ECDSA accepts only fixed-width R || S', () => {
       zeroS.fill(0, half);
 
       for (const candidate of [zeroR, zeroS, new Uint8Array(raw.length)]) {
-        expect(await verifyEcdsa(algorithm, publicJwk, SIGNING_INPUT, candidate)).toEqual({ ok: true, value: false });
+        assert.deepStrictEqual(await verifyEcdsa(algorithm, publicJwk, SIGNING_INPUT, candidate), {
+          ok: true,
+          value: false,
+        });
       }
     });
 
@@ -85,7 +92,7 @@ describe('ECDSA accepts only fixed-width R || S', () => {
       const { privateKey, publicJwk } = keyPair(curve);
       const raw = new Uint8Array(nodeSign(hash, SIGNING_INPUT, { key: privateKey, dsaEncoding: 'ieee-p1363' }));
 
-      expect(await verifyEcdsa(algorithm, publicJwk, SIGNING_INPUT, raw)).toEqual({ ok: true, value: true });
+      assert.deepStrictEqual(await verifyEcdsa(algorithm, publicJwk, SIGNING_INPUT, raw), { ok: true, value: true });
     });
   }
 });

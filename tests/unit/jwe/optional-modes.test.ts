@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { randomBytes } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 
@@ -122,15 +123,15 @@ describe('AES-GCM key wrapping end to end', () => {
         nonceAllocator: trackingAllocator(),
       });
 
-      expect(encrypted.ok).toBe(true);
+      assert.strictEqual(encrypted.ok, true);
       if (!encrypted.ok) {
         return;
       }
 
       const result = await decrypt(encrypted.value, [{ principalId: 'a', key: pair.decryption }], algorithm);
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (result.ok) {
-        expect(result.plaintext).toEqual(PLAINTEXT);
+        assert.deepStrictEqual(result.plaintext, PLAINTEXT);
       }
     });
   }
@@ -155,14 +156,14 @@ describe('AES-GCM key wrapping end to end', () => {
     const parsed = JSON.parse(encrypted.value);
     const header = JSON.parse(Buffer.from(parsed.protected, 'base64url').toString('utf8'));
 
-    expect(typeof header.iv).toBe('string');
-    expect(typeof header.tag).toBe('string');
-    expect(Buffer.from(header.iv, 'base64url')).toHaveLength(GCMKW_IV_BYTES);
-    expect(Buffer.from(header.tag, 'base64url')).toHaveLength(16);
+    assert.strictEqual(typeof header.iv, 'string');
+    assert.strictEqual(typeof header.tag, 'string');
+    assert.strictEqual(Buffer.from(header.iv, 'base64url').length, GCMKW_IV_BYTES);
+    assert.strictEqual(Buffer.from(header.tag, 'base64url').length, 16);
 
     // The header values are the wrapping ones, not the content ones.
-    expect(header.iv).not.toBe(parsed.iv);
-    expect(header.tag).not.toBe(parsed.tag);
+    assert.notStrictEqual(header.iv, parsed.iv);
+    assert.notStrictEqual(header.tag, parsed.tag);
   });
 
   test('scopes the wrapping nonce to the actual wrapping key', async () => {
@@ -183,7 +184,7 @@ describe('AES-GCM key wrapping end to end', () => {
       nonceAllocator: allocator,
     });
 
-    expect(allocator.identities).toEqual(['keywrap:wrapping-key-a']);
+    assert.deepStrictEqual(allocator.identities, ['keywrap:wrapping-key-a']);
   });
 
   test('gives two keys sharing an algorithm two nonce spaces', async () => {
@@ -204,7 +205,7 @@ describe('AES-GCM key wrapping end to end', () => {
       });
     }
 
-    expect(allocator.identities).toEqual(['keywrap:wrapping-key-a', 'keywrap:wrapping-key-b']);
+    assert.deepStrictEqual(allocator.identities, ['keywrap:wrapping-key-a', 'keywrap:wrapping-key-b']);
   });
 
   test('gives one key configured twice a single nonce space', async () => {
@@ -227,7 +228,7 @@ describe('AES-GCM key wrapping end to end', () => {
       });
     }
 
-    expect(allocator.identities).toEqual(['keywrap:shared-key', 'keywrap:shared-key']);
+    assert.deepStrictEqual(allocator.identities, ['keywrap:shared-key', 'keywrap:shared-key']);
   });
 
   test('refuses to wrap under GCM without a provisioned key identity', async () => {
@@ -244,10 +245,10 @@ describe('AES-GCM key wrapping end to end', () => {
       nonceAllocator: trackingAllocator(),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('key_identity_required');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'key_identity_required');
     }
   });
 
@@ -264,9 +265,9 @@ describe('AES-GCM key wrapping end to end', () => {
       random: systemRandom,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('nonce_allocator_required');
+      assert.strictEqual(result.reason, 'nonce_allocator_required');
     }
   });
 
@@ -293,9 +294,9 @@ describe('AES-GCM key wrapping end to end', () => {
     parsed.protected = Buffer.from(JSON.stringify(header)).toString('base64url');
 
     const result = await decrypt(JSON.stringify(parsed), [{ principalId: 'a', key: pair.decryption }], 'A256GCMKW');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('authentication_failure');
+      assert.strictEqual(result.category, 'authentication_failure');
     }
   });
 
@@ -314,9 +315,9 @@ describe('AES-GCM key wrapping end to end', () => {
         protectedHeader: { [name]: 'injected' },
       });
 
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe(`reserved_header_${name}`);
+        assert.strictEqual(result.reason, `reserved_header_${name}`);
       }
     }
   });
@@ -383,16 +384,16 @@ describe('PBES2 is receive-only', () => {
   test('refuses creation under a password-derived key', async () => {
     // A policy cannot even be built for creation, so the refusal is visible at
     // configuration rather than at the point of use.
-    expect(() => AlgorithmPolicy.create('jwe_alg', ['PBES2-HS256+A128KW'], 'create')).toThrow();
+    assert.throws(() => AlgorithmPolicy.create('jwe_alg', ['PBES2-HS256+A128KW'], 'create'));
   });
 
   test('accepts a received object with a configured password', async () => {
     const result = await decrypt(await foreignObject(), [passwordKey()], 'PBES2-HS256+A128KW');
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(PLAINTEXT);
-      expect(result.principalId).toBe('alice');
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
+      assert.strictEqual(result.principalId, 'alice');
     }
   });
 
@@ -402,9 +403,9 @@ describe('PBES2 is receive-only', () => {
     const withoutPassword = { principalId: 'alice', key: passwordKey().key };
 
     const result = await decrypt(await foreignObject(), [withoutPassword], 'PBES2-HS256+A128KW');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('authentication_failure');
+      assert.strictEqual(result.category, 'authentication_failure');
     }
   });
 
@@ -412,10 +413,10 @@ describe('PBES2 is receive-only', () => {
     const wrong = { principalId: 'alice', key: passwordKey().key, password: new TextEncoder().encode('guess') };
 
     const result = await decrypt(await foreignObject(), [wrong], 'PBES2-HS256+A128KW');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('authentication_failure');
-      expect(result.reason).toBe('decryption_failed');
+      assert.strictEqual(result.category, 'authentication_failure');
+      assert.strictEqual(result.reason, 'decryption_failed');
     }
   });
 
@@ -429,11 +430,11 @@ describe('PBES2 is receive-only', () => {
 
     const result = await decrypt(JSON.stringify(parsed), [passwordKey()], 'PBES2-HS256+A128KW');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.stage).toBe('header');
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('iterations_below_minimum');
+      assert.strictEqual(result.stage, 'header');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'iterations_below_minimum');
     }
   });
 
@@ -447,9 +448,9 @@ describe('PBES2 is receive-only', () => {
     parsed.protected = Buffer.from(JSON.stringify(header)).toString('base64url');
 
     const result = await decrypt(JSON.stringify(parsed), [passwordKey()], 'PBES2-HS256+A128KW');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('iterations_above_maximum');
+      assert.strictEqual(result.reason, 'iterations_above_maximum');
     }
   });
 
@@ -461,9 +462,9 @@ describe('PBES2 is receive-only', () => {
 
     const result = await decrypt(JSON.stringify(parsed), [passwordKey()], 'PBES2-HS256+A128KW');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('salt_too_short');
+      assert.strictEqual(result.reason, 'salt_too_short');
     }
   });
 
@@ -478,9 +479,9 @@ describe('PBES2 is receive-only', () => {
       parsed.protected = Buffer.from(rewritten).toString('base64url');
 
       const result = await decrypt(JSON.stringify(parsed), [passwordKey()], 'PBES2-HS256+A128KW');
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('p2c_not_a_positive_integer');
+        assert.strictEqual(result.reason, 'p2c_not_a_positive_integer');
       }
     }
   });
@@ -494,7 +495,7 @@ describe('PBES2 is receive-only', () => {
       parsed.protected = Buffer.from(JSON.stringify(header)).toString('base64url');
 
       const result = await decrypt(JSON.stringify(parsed), [passwordKey()], 'PBES2-HS256+A128KW');
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
     }
   });
 });
@@ -545,11 +546,11 @@ describe('compression is disabled', () => {
 
     const result = await decrypt(serialized, [trusted], 'dir');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.stage).toBe('header');
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('compression_not_enabled');
+      assert.strictEqual(result.stage, 'header');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'compression_not_enabled');
     }
   });
 
@@ -564,9 +565,9 @@ describe('compression is disabled', () => {
       };
 
       const result = await decrypt(serialized, [trusted], 'dir');
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('compression_not_enabled');
+        assert.strictEqual(result.reason, 'compression_not_enabled');
       }
     }
   });
@@ -584,9 +585,9 @@ describe('compression is disabled', () => {
       protectedHeader: { zip: 'DEF' },
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('reserved_header_zip');
+      assert.strictEqual(result.reason, 'reserved_header_zip');
     }
   });
 });

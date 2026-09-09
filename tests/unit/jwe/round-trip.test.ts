@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 
 import { contentEncryptionShape, sealContent } from '../../../src/algorithms/content-encryption/index.ts';
@@ -136,31 +137,31 @@ describe('round trips', () => {
     test(`dir with ${enc}`, async () => {
       const pair = symmetric('dir', contentEncryptionShape(enc)!.cekBytes, undefined, [enc]);
       const encrypted = await encrypt([pair], ['dir'], enc);
-      expect(encrypted.ok).toBe(true);
+      assert.strictEqual(encrypted.ok, true);
       if (!encrypted.ok) {
         return;
       }
 
       const result = await decrypt(encrypted.value, [{ principalId: 'alice', key: pair.decryption }], ['dir'], enc);
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (result.ok) {
-        expect(result.plaintext).toEqual(PLAINTEXT);
-        expect(result.principalId).toBe('alice');
+        assert.deepStrictEqual(result.plaintext, PLAINTEXT);
+        assert.strictEqual(result.principalId, 'alice');
       }
     });
 
     test(`A256KW with ${enc}`, async () => {
       const pair = symmetric('A256KW', 32);
       const encrypted = await encrypt([pair], ['A256KW'], enc);
-      expect(encrypted.ok).toBe(true);
+      assert.strictEqual(encrypted.ok, true);
       if (!encrypted.ok) {
         return;
       }
 
       const result = await decrypt(encrypted.value, [{ principalId: 'a', key: pair.decryption }], ['A256KW'], enc);
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (result.ok) {
-        expect(result.plaintext).toEqual(PLAINTEXT);
+        assert.deepStrictEqual(result.plaintext, PLAINTEXT);
       }
     });
   }
@@ -168,7 +169,7 @@ describe('round trips', () => {
   test('RSA-OAEP-256 transports the CEK', async () => {
     const pair = rsaPair();
     const encrypted = await encrypt([pair], ['RSA-OAEP-256'], 'A128GCM');
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
@@ -179,41 +180,41 @@ describe('round trips', () => {
       ['RSA-OAEP-256'],
       'A128GCM',
     );
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(PLAINTEXT);
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
     }
   });
 
   test('ECDH-ES derives the CEK directly', async () => {
     const pair = ecPair('ECDH-ES');
     const encrypted = await encrypt([pair], ['ECDH-ES'], 'A128GCM');
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     // Direct agreement carries no encrypted key at all.
     const parsed = JSON.parse(encrypted.value);
-    expect(parsed.recipients[0].encrypted_key).toBeUndefined();
+    assert.strictEqual(parsed.recipients[0].encrypted_key, undefined);
 
     const result = await decrypt(encrypted.value, [{ principalId: 'a', key: pair.decryption }], ['ECDH-ES'], 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(PLAINTEXT);
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
     }
   });
 
   test('ECDH-ES+A128KW wraps a fresh CEK', async () => {
     const pair = ecPair('ECDH-ES+A128KW');
     const encrypted = await encrypt([pair], ['ECDH-ES+A128KW'], 'A256GCM');
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     const parsed = JSON.parse(encrypted.value);
-    expect(typeof parsed.recipients[0].encrypted_key).toBe('string');
+    assert.strictEqual(typeof parsed.recipients[0].encrypted_key, 'string');
 
     const result = await decrypt(
       encrypted.value,
@@ -221,18 +222,18 @@ describe('round trips', () => {
       ['ECDH-ES+A128KW'],
       'A256GCM',
     );
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(PLAINTEXT);
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
     }
   });
 
   test('refuses content encryption outside the key binding', async () => {
     const pair = ecPair('ECDH-ES', 'P-256', ['A128GCM']);
     const result = await encrypt([pair], ['ECDH-ES'], 'A256GCM');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('content_algorithm_not_bound');
+      assert.strictEqual(result.reason, 'content_algorithm_not_bound');
     }
   });
 
@@ -245,26 +246,26 @@ describe('round trips', () => {
     }
 
     const header = JSON.parse(Buffer.from(JSON.parse(encrypted.value).protected, 'base64url').toString('utf8'));
-    expect(header.epk).toBeDefined();
-    expect(header.epk.d).toBeUndefined();
-    expect(header.epk.kty).toBe('EC');
-    expect(typeof header.epk.x).toBe('string');
+    assert.notStrictEqual(header.epk, undefined);
+    assert.strictEqual(header.epk.d, undefined);
+    assert.strictEqual(header.epk.kty, 'EC');
+    assert.strictEqual(typeof header.epk.x, 'string');
   });
 
   test('emits the flattened form on request', async () => {
     const pair = symmetric('A256KW', 32);
     const encrypted = await encrypt([pair], ['A256KW'], 'A128GCM', { flattened: true });
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     const parsed = JSON.parse(encrypted.value);
-    expect(parsed.recipients).toBeUndefined();
-    expect(typeof parsed.encrypted_key).toBe('string');
+    assert.strictEqual(parsed.recipients, undefined);
+    assert.strictEqual(typeof parsed.encrypted_key, 'string');
 
     const result = await decrypt(encrypted.value, [{ principalId: 'a', key: pair.decryption }], ['A256KW'], 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('round-trips an empty plaintext', async () => {
@@ -278,18 +279,18 @@ describe('round trips', () => {
       random: systemRandom,
       nonceAllocator: allocator(),
     });
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     // GCM produces no ciphertext octets, but the member stays present.
-    expect(JSON.parse(encrypted.value).ciphertext).toBe('');
+    assert.strictEqual(JSON.parse(encrypted.value).ciphertext, '');
 
     const result = await decrypt(encrypted.value, [{ principalId: 'a', key: pair.decryption }], ['A256KW'], 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(new Uint8Array(0));
+      assert.deepStrictEqual(result.plaintext, new Uint8Array(0));
     }
   });
 
@@ -302,18 +303,19 @@ describe('round trips', () => {
     }
 
     const parsed = JSON.parse(encrypted.value);
-    expect(parsed.aad).toBe(Buffer.from(aad).toString('base64url'));
+    assert.strictEqual(parsed.aad, Buffer.from(aad).toString('base64url'));
 
-    expect(
+    assert.strictEqual(
       (await decrypt(encrypted.value, [{ principalId: 'a', key: pair.decryption }], ['A256KW'], 'A128GCM')).ok,
-    ).toBe(true);
+      true,
+    );
 
     // Changing the AAD changes the authenticated data, so the tag fails.
     const tampered = JSON.stringify({ ...parsed, aad: Buffer.from('other').toString('base64url') });
     const result = await decrypt(tampered, [{ principalId: 'a', key: pair.decryption }], ['A256KW'], 'A128GCM');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('authentication_failure');
+      assert.strictEqual(result.category, 'authentication_failure');
     }
   });
 
@@ -326,7 +328,7 @@ describe('round trips', () => {
       throw new Error('encrypt failed');
     }
 
-    expect(JSON.parse(encrypted.value).aad).toBeUndefined();
+    assert.strictEqual(JSON.parse(encrypted.value).aad, undefined);
   });
 });
 
@@ -350,11 +352,11 @@ describe('secret lifetime', () => {
       nonceAllocator: allocator(),
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     // The CEK and the content IV are both drawn here; only the CEK is a secret
     // that must not survive the operation.
-    expect(generated).toHaveLength(2);
-    expect(generated[0]).toEqual(new Uint8Array(16));
+    assert.strictEqual(generated.length, 2);
+    assert.deepStrictEqual(generated[0], new Uint8Array(16));
   });
 });
 
@@ -377,17 +379,17 @@ describe('multiple recipients share one content operation', () => {
       random: systemRandom,
       nonceAllocator: allocator(),
     });
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     const parsed = JSON.parse(encrypted.value);
-    expect(parsed.recipients).toHaveLength(2);
+    assert.strictEqual(parsed.recipients.length, 2);
     // One ciphertext and one tag for the whole object, not one per recipient.
-    expect(typeof parsed.ciphertext).toBe('string');
-    expect(typeof parsed.tag).toBe('string');
-    expect(parsed.recipients[0].encrypted_key).not.toBe(parsed.recipients[1].encrypted_key);
+    assert.strictEqual(typeof parsed.ciphertext, 'string');
+    assert.strictEqual(typeof parsed.tag, 'string');
+    assert.notStrictEqual(parsed.recipients[0].encrypted_key, parsed.recipients[1].encrypted_key);
 
     for (const recipient of [alice, bob]) {
       const result = await decrypt(
@@ -396,9 +398,9 @@ describe('multiple recipients share one content operation', () => {
         ['A256KW'],
         'A256GCM',
       );
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (result.ok) {
-        expect(result.plaintext).toEqual(PLAINTEXT);
+        assert.deepStrictEqual(result.plaintext, PLAINTEXT);
       }
     }
   });
@@ -445,7 +447,7 @@ describe('multiple recipients share one content operation', () => {
         random: systemRandom,
         nonceAllocator: allocator(),
       });
-      expect(encrypted.ok).toBe(true);
+      assert.strictEqual(encrypted.ok, true);
       if (!encrypted.ok) {
         return;
       }
@@ -456,10 +458,10 @@ describe('multiple recipients share one content operation', () => {
       for (const name of parameters) {
         // A shared copy would describe only the first recipient, so with
         // several recipients the parameter belongs to each entry instead.
-        expect(protectedHeader[name]).toBeUndefined();
-        expect(parsed.recipients[0].header[name]).toBeDefined();
-        expect(parsed.recipients[1].header[name]).toBeDefined();
-        expect(parsed.recipients[0].header[name]).not.toEqual(parsed.recipients[1].header[name]);
+        assert.strictEqual(protectedHeader[name], undefined);
+        assert.notStrictEqual(parsed.recipients[0].header[name], undefined);
+        assert.notStrictEqual(parsed.recipients[1].header[name], undefined);
+        assert.notDeepStrictEqual(parsed.recipients[0].header[name], parsed.recipients[1].header[name]);
       }
 
       for (const pair of pairs) {
@@ -469,9 +471,9 @@ describe('multiple recipients share one content operation', () => {
           [algorithm],
           'A128GCM',
         );
-        expect(result.ok).toBe(true);
+        assert.strictEqual(result.ok, true);
         if (result.ok) {
-          expect(result.plaintext).toEqual(PLAINTEXT);
+          assert.deepStrictEqual(result.plaintext, PLAINTEXT);
         }
       }
     });
@@ -484,9 +486,9 @@ describe('multiple recipients share one content operation', () => {
     const b = symmetric('dir', 16, undefined, ['A128GCM']);
 
     const result = await encrypt([a, b], ['dir'], 'A128GCM');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('algorithm_requires_single_recipient');
+      assert.strictEqual(result.reason, 'algorithm_requires_single_recipient');
     }
   });
 });
@@ -513,23 +515,23 @@ describe('tampering is detected', () => {
 
   test('a modified ciphertext fails authentication', async () => {
     const result = await tamper('ciphertext', flip);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('authentication_failure');
+      assert.strictEqual(result.category, 'authentication_failure');
     }
   });
 
   test('a modified tag fails authentication', async () => {
     const result = await tamper('tag', flip);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('authentication_failure');
+      assert.strictEqual(result.category, 'authentication_failure');
     }
   });
 
   test('a modified IV fails authentication', async () => {
     const result = await tamper('iv', flip);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
   });
 
   test('a modified protected header fails authentication', async () => {
@@ -539,9 +541,9 @@ describe('tampering is detected', () => {
       const header = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
       return Buffer.from(JSON.stringify({ ...header, extra: 'injected' })).toString('base64url');
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('authentication_failure');
+      assert.strictEqual(result.category, 'authentication_failure');
     }
   });
 
@@ -559,9 +561,9 @@ describe('tampering is detected', () => {
       ['A256KW'],
       'A128GCM',
     );
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('malformed_input');
+      assert.strictEqual(result.category, 'malformed_input');
     }
   });
 
@@ -583,11 +585,11 @@ describe('tampering is detected', () => {
     );
     const badTag = await tamper('tag', flip);
 
-    expect(wrongKey.ok).toBe(false);
-    expect(badTag.ok).toBe(false);
+    assert.strictEqual(wrongKey.ok, false);
+    assert.strictEqual(badTag.ok, false);
     if (!wrongKey.ok && !badTag.ok) {
-      expect(wrongKey.category).toBe(badTag.category);
-      expect(wrongKey.reason).toBe(badTag.reason);
+      assert.strictEqual(wrongKey.category, badTag.category);
+      assert.strictEqual(wrongKey.reason, badTag.reason);
     }
   });
 
@@ -600,10 +602,10 @@ describe('tampering is detected', () => {
       protectedHeader: { b64: false, crit: ['b64'] },
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('unsupported_critical_parameter');
-      expect(result.reason).toBe('critical_extension_not_implemented');
+      assert.strictEqual(result.category, 'unsupported_critical_parameter');
+      assert.strictEqual(result.reason, 'critical_extension_not_implemented');
     }
   });
 
@@ -635,9 +637,9 @@ describe('tampering is detected', () => {
     });
 
     const result = await decrypt(serialized, [{ principalId: 'alice', key: pair.decryption }], ['A256KW'], 'A128GCM');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('unsupported_critical_parameter');
+      assert.strictEqual(result.category, 'unsupported_critical_parameter');
     }
   });
 });
@@ -665,19 +667,19 @@ describe('ECDH agreement parameters', () => {
     const encrypted = await encrypt([pair], ['ECDH-ES'], 'A128GCM', {
       protectedHeader: { apu: 'QWxpY2U', apv: 'Qm9i' },
     });
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     const header = JSON.parse(Buffer.from(JSON.parse(encrypted.value).protected, 'base64url').toString());
-    expect(header.apu).toBe('QWxpY2U');
-    expect(header.apv).toBe('Qm9i');
+    assert.strictEqual(header.apu, 'QWxpY2U');
+    assert.strictEqual(header.apv, 'Qm9i');
 
     const result = await decrypt(encrypted.value, [{ principalId: 'a', key: pair.decryption }], ['ECDH-ES'], 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(PLAINTEXT);
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
     }
   });
 
@@ -687,10 +689,10 @@ describe('ECDH agreement parameters', () => {
     const pair = symmetric('A256KW', 32);
     const result = await encrypt([pair], ['A256KW'], 'A128GCM', { protectedHeader: { apu: 'QWxpY2U' } });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_header');
-      expect(result.reason).toBe('party_info_requires_agreement_algorithm');
+      assert.strictEqual(result.category, 'invalid_header');
+      assert.strictEqual(result.reason, 'party_info_requires_agreement_algorithm');
     }
   });
 
@@ -735,11 +737,11 @@ describe('ECDH agreement parameters', () => {
         'A128GCM',
       );
 
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.stage).toBe('header');
-        expect(result.category).toBe('invalid_header');
-        expect(result.reason).toBe(reason);
+        assert.strictEqual(result.stage, 'header');
+        assert.strictEqual(result.category, 'invalid_header');
+        assert.strictEqual(result.reason, reason);
       }
     });
   }
@@ -770,9 +772,9 @@ describe('ECDH agreement parameters', () => {
       ['RSA-OAEP-256'],
       'A128GCM',
     );
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(PLAINTEXT);
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
     }
   });
 });
@@ -792,9 +794,9 @@ describe('creation validates its own configuration', () => {
         },
       },
     });
-    expect(randomFailure.ok).toBe(false);
+    assert.strictEqual(randomFailure.ok, false);
     if (!randomFailure.ok) {
-      expect(randomFailure.category).toBe('backend_failure');
+      assert.strictEqual(randomFailure.category, 'backend_failure');
     }
 
     const direct = symmetric('dir', 16, undefined, ['A128GCM']);
@@ -807,9 +809,9 @@ describe('creation validates its own configuration', () => {
       random: systemRandom,
       nonceAllocator: { reserve: () => Promise.reject(new Error('offline')) },
     });
-    expect(nonceFailure.ok).toBe(false);
+    assert.strictEqual(nonceFailure.ok, false);
     if (!nonceFailure.ok) {
-      expect(nonceFailure.category).toBe('backend_failure');
+      assert.strictEqual(nonceFailure.category, 'backend_failure');
     }
   });
   test('refuses a policy built for acceptance', async () => {
@@ -827,10 +829,10 @@ describe('creation validates its own configuration', () => {
       nonceAllocator: allocator(),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('policy_not_built_for_creation');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'policy_not_built_for_creation');
     }
   });
 
@@ -854,7 +856,7 @@ describe('creation validates its own configuration', () => {
       nonceAllocator: allocator(),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
   });
 
   const HEADER_DEFECTS = [
@@ -885,10 +887,10 @@ describe('creation validates its own configuration', () => {
         protectedHeader: header as Record<string, unknown>,
       });
 
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.stage).toBe('configuration');
-        expect(result.reason).toBe(reason);
+        assert.strictEqual(result.stage, 'configuration');
+        assert.strictEqual(result.reason, reason);
       }
     });
   }
@@ -907,9 +909,9 @@ describe('creation validates its own configuration', () => {
       nonceAllocator: allocator(),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('unprotected_crit_not_permitted');
+      assert.strictEqual(result.reason, 'unprotected_crit_not_permitted');
     }
   });
 
@@ -937,8 +939,8 @@ describe('creation validates its own configuration', () => {
       protectedHeader: { kid: ['wrong', 'type'] as unknown as string },
     });
 
-    expect(result.ok).toBe(false);
-    expect(reserved).toEqual([]);
+    assert.strictEqual(result.ok, false);
+    assert.deepStrictEqual(reserved, []);
   });
 
   test('treats a header named like an inherited member as ordinary data', async () => {
@@ -948,17 +950,17 @@ describe('creation validates its own configuration', () => {
     const encrypted = await encrypt([pair], ['A256KW'], 'A128GCM', {
       protectedHeader: { constructor: 'x', __proto__: 'y' },
     });
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     const header = JSON.parse(Buffer.from(JSON.parse(encrypted.value).protected, 'base64url').toString());
-    expect(header.constructor).toBe('x');
-    expect(Object.getPrototypeOf(header)).toBe(Object.prototype);
+    assert.strictEqual(header.constructor, 'x');
+    assert.strictEqual(Object.getPrototypeOf(header), Object.prototype);
 
     const result = await decrypt(encrypted.value, [{ principalId: 'a', key: pair.decryption }], ['A256KW'], 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 });
 
@@ -995,10 +997,10 @@ describe('resource limits reach the whole operation', () => {
       limits: lowerLimits({ payload: PLAINTEXT.length - 1 }),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
-      expect(result.reason).toBe('plaintext_too_large');
+      assert.strictEqual(result.category, 'resource_limit');
+      assert.strictEqual(result.reason, 'plaintext_too_large');
     }
   });
 
@@ -1023,10 +1025,10 @@ describe('resource limits reach the whole operation', () => {
     }
     const parsed = parseJsonJwe(json.value, LIMITS_V1);
 
-    expect(parsed.ok).toBe(false);
+    assert.strictEqual(parsed.ok, false);
     if (!parsed.ok) {
-      expect(parsed.category).toBe('invalid_encoding');
-      expect(parsed.reason).toBe('aad_invalid_base64url');
+      assert.strictEqual(parsed.category, 'invalid_encoding');
+      assert.strictEqual(parsed.reason, 'aad_invalid_base64url');
     }
   });
 });
