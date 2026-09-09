@@ -513,15 +513,13 @@ function validateContentBinding(
 /**
  * Marks a record as having been produced by this module.
  *
- * Module-private and never exported, so a record assembled elsewhere — by
- * spreading a real key, or built literally to satisfy the type — cannot carry
- * it. That is what lets dispatch reject a forged key rather than operating on
- * whatever material the caller attached.
+ * The module-private set recognizes exact objects only, so a record assembled
+ * elsewhere by copying or inheriting from a real key cannot gain trusted status.
  */
-const IMPORTED = Symbol('imported-key');
+const IMPORTED_KEYS = new WeakSet<UsableKey>();
 
 export function isImportedKey(key: UsableKey): boolean {
-  return (key as { [IMPORTED]?: true })[IMPORTED] === true;
+  return IMPORTED_KEYS.has(key);
 }
 
 /** Copies every `Uint8Array` in a flat material record, leaving scalars alone. */
@@ -571,12 +569,13 @@ function seal(key: UsableKey): UsableKey {
     { ...rest, identity: copyMaterial(identity), metadata: Object.freeze({ ...metadata }) },
     {
       material: { ...hidden, value: copyMaterial(material) },
-      [IMPORTED]: { ...hidden, value: true },
       toJSON: { ...hidden, value: describe },
-      // Node and Bun both consult this symbol before their default formatting.
+      // Node consults this symbol before its default formatting.
       [Symbol.for('nodejs.util.inspect.custom')]: { ...hidden, value: describe },
     },
   );
 
-  return Object.freeze(sealed) as UsableKey;
+  const imported = Object.freeze(sealed) as UsableKey;
+  IMPORTED_KEYS.add(imported);
+  return imported;
 }
