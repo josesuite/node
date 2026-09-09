@@ -253,6 +253,17 @@ describe('interoperability with an independently built object', () => {
 });
 
 describe('Compact cannot express what it has no room for', () => {
+  test('forwards JSON encryption failures', async () => {
+    const pair = symmetric('A256KW', 32, ['A128GCM']);
+    const result = await encrypt(pair.encryption, 'A256KW', 'A192GCM');
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'incompatible_key');
+      assert.strictEqual(result.reason, 'content_algorithm_not_bound');
+    }
+  });
+
   test('refuses an unprotected header', async () => {
     // Dropping it would emit an object missing data the caller supplied.
     const pair = symmetric('A256KW', 32);
