@@ -309,6 +309,26 @@ describe('HDR-04 and HDR-06 critical extensions', () => {
     }
   });
 
+  test('an inherited object property does not satisfy a critical name', () => {
+    // A presence check reaching the prototype chain would treat these as sent by
+    // the producer, silently satisfying an extension nobody declared.
+    for (const name of ['__proto__', 'constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+      const absent = validateCritical(header(JSON.stringify({ alg: 'ES256', crit: [name] })), 'jws');
+      expect(absent.ok).toBe(false);
+      if (!absent.ok) {
+        expect(absent.reason).toBe('crit_names_absent_parameter');
+      }
+
+      // Genuinely present, it is an ordinary extension with no implemented
+      // semantics rather than something already understood.
+      const present = validateCritical(header(JSON.stringify({ alg: 'ES256', [name]: 'v', crit: [name] })), 'jws');
+      expect(present.ok).toBe(false);
+      if (!present.ok) {
+        expect(present.category).toBe('unsupported_critical_parameter');
+      }
+    }
+  });
+
   test('rejects a present extension with no implemented semantics', () => {
     // Recognition is not understanding: the name is present and well formed,
     // but no semantics exist for it.
