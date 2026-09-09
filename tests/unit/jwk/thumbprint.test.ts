@@ -83,4 +83,67 @@ describe('JWK thumbprints', () => {
     assert.strictEqual(toThumbprintUri(`${digest.slice(0, 42)}B`).ok, false);
     assert.strictEqual(parseThumbprintUri(`${PREFIX}${digest.slice(0, 42)}=`).ok, false);
   });
+
+  test('rejects a URI under any other hash label', () => {
+    // Only SHA-256 is accepted, which is narrower than the registry permits,
+    // and the whole string must match rather than just the prefix.
+    const jwk = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ format: 'jwk' });
+    const digest = thumbprint(imported(jwk));
+
+    for (const uri of [
+      `urn:ietf:params:oauth:jwk-thumbprint:sha-512:${digest}`,
+      `urn:ietf:params:oauth:jwk-thumbprint:${digest}`,
+      digest,
+      `prefix:${PREFIX}${digest}`,
+    ]) {
+      assert.strictEqual(parseThumbprintUri(uri).ok, false);
+    }
+  });
+
+  test('hashes the required members for every supported key type', () => {
+    // The member set and its lexicographic order are part of the definition:
+    // an implementation that hashes a different projection produces an
+    // identifier no other implementation agrees with.
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 3072 }).publicKey.export({ format: 'jwk' });
+    const rsaKey = importKeyBytes(new TextEncoder().encode(JSON.stringify(rsa)), {
+      algorithm: 'RS256',
+      operation: 'verify',
+    });
+    assert.strictEqual(rsaKey.ok, true);
+    if (rsaKey.ok) {
+      assert.strictEqual(
+        thumbprint(rsaKey.key),
+        createHash('sha256').update(`{"e":"${rsa.e}","kty":"RSA","n":"${rsa.n}"}`).digest('base64url'),
+      );
+    }
+
+    const k = Buffer.alloc(32, 1).toString('base64url');
+    const octKey = importKeyBytes(new TextEncoder().encode(JSON.stringify({ kty: 'oct', k })), {
+      algorithm: 'HS256',
+      operation: 'verify',
+    });
+    assert.strictEqual(octKey.ok, true);
+    if (octKey.ok) {
+      assert.strictEqual(
+        thumbprint(octKey.key),
+        createHash('sha256').update(`{"k":"${k}","kty":"oct"}`).digest('base64url'),
+      );
+    }
+
+    // An OKP thumbprint omits `y`, unlike EC; including it would give the same
+    // key two identifiers.
+    const okp = generateKeyPairSync('x25519').publicKey.export({ format: 'jwk' });
+    const okpKey = importKeyBytes(new TextEncoder().encode(JSON.stringify(okp)), {
+      algorithm: 'ECDH-ES',
+      operation: 'deriveKey',
+      contentAlgorithms: ['A128GCM'],
+    });
+    assert.strictEqual(okpKey.ok, true);
+    if (okpKey.ok) {
+      assert.strictEqual(
+        thumbprint(okpKey.key),
+        createHash('sha256').update(`{"crv":"${okp.crv}","kty":"OKP","x":"${okp.x}"}`).digest('base64url'),
+      );
+    }
+  });
 });
