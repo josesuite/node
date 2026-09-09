@@ -214,6 +214,17 @@ describe('one principal per key', () => {
     }
   });
 
+  test('permits identical wrapping-key bindings under one principal', () => {
+    const shared = octJwk(new Uint8Array(32).fill(4));
+    const options = { algorithm: 'A256KW', operation: 'wrapKey' as const, contentAlgorithms: ['A128GCM'] };
+    const result = buildSnapshot('recipient-a', [
+      input({ ...shared, kid: 'a' }, 'recipient-a', options),
+      input({ ...shared, kid: 'b' }, 'recipient-a', options),
+    ]);
+
+    assert.strictEqual(result.ok, true);
+  });
+
   test('identifier differences do not make one key into two', () => {
     // Identity is key material, never the label attached to it.
     const shared = ecJwk();
