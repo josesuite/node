@@ -129,6 +129,17 @@ describe('EC key material', () => {
 });
 
 describe('OKP key material', () => {
+  test('rejects Ed25519 without an approved public-key validator', () => {
+    const jwk = okpJwk('Ed25519');
+    const result = validateOkpMaterial(object(jwk), 'Ed25519', deriveOkpPublicKey);
+
+    assert.deepStrictEqual(result, {
+      ok: false,
+      category: 'unsupported_algorithm',
+      reason: 'ed25519_validator_unavailable',
+    });
+  });
+
   test('accepts valid public and private keys on each available curve', () => {
     for (const curve of OKP_CURVES) {
       const jwk = okpJwk(curve);
