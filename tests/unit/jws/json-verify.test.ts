@@ -592,6 +592,52 @@ describe('trusted signer configuration', () => {
 });
 
 describe('creation guards', () => {
+  test('bounds signer count, payload bytes, and protected header bytes', async () => {
+    const alice = ecSigner('alice');
+    const policy = AlgorithmPolicy.create('jws', ['ES256'], 'create');
+    const cases = [
+      signJson(PAYLOAD, { policy, signers: [{ key: alice.signing }], limits: lowerLimits({ signatures: 0 }) }),
+      signJson(PAYLOAD, { policy, signers: [{ key: alice.signing }], limits: lowerLimits({ payload: 0 }) }),
+      signJson(PAYLOAD, { policy, signers: [{ key: alice.signing }], limits: lowerLimits({ headerSource: 1 }) }),
+    ];
+
+    for (const result of await Promise.all(cases)) {
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.category, 'resource_limit');
+      }
+    }
+  });
+
+  test('refuses a public signing key', async () => {
+    const alice = ecSigner('alice');
+    const result = await signJson(PAYLOAD, {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      signers: [{ key: alice.verification }],
+      limits: LIMITS_V1,
+    });
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'signing_requires_private_key');
+    }
+  });
+
+  test('refuses a private key bound to verification', async () => {
+    const generated = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const privateJwk = generated.privateKey.export({ format: 'jwk' }) as unknown as Record<string, unknown>;
+    const result = await signJson(PAYLOAD, {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      signers: [{ key: key(privateJwk, 'ES256', 'verify') }],
+      limits: LIMITS_V1,
+    });
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'key_operation_mismatch');
+    }
+  });
+
   test('refuses the flattened form with several signers', async () => {
     const alice = ecSigner('alice');
     const bob = ecSigner('bob');
@@ -625,6 +671,31 @@ describe('creation guards', () => {
     assert.strictEqual(result.ok, false);
     if (!result.ok) {
       assert.strictEqual(result.reason, 'header_name_collision');
+    }
+  });
+
+  test('compares only supplied header names', async () => {
+    const alice = ecSigner('alice');
+    const result = await signJson(PAYLOAD, {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      signers: [
+        {
+          key: alice.signing,
+          protectedHeader: { ['__proto__']: 'protected' },
+          unprotectedHeader: { constructor: 'unprotected' },
+        },
+      ],
+      limits: LIMITS_V1,
+    });
+
+    assert.strictEqual(result.ok, true);
+    if (result.ok) {
+      const value = JSON.parse(result.value);
+      assert.strictEqual(value.signatures[0].header.constructor, 'unprotected');
+      assert.deepStrictEqual(JSON.parse(Buffer.from(value.signatures[0].protected, 'base64url').toString()), {
+        ['__proto__']: 'protected',
+        alg: 'ES256',
+      });
     }
   });
 
