@@ -9,18 +9,6 @@
  */
 
 /**
- * Copies into a buffer this library owns exclusively.
- *
- * A `Uint8Array` can be a view onto a larger `ArrayBuffer`; slicing by the
- * view's own offsets is required so a view never exposes neighbouring bytes.
- */
-export function copyBytes(input: Uint8Array): Uint8Array {
-  const copy = new Uint8Array(input.length);
-  copy.set(input);
-  return copy;
-}
-
-/**
  * Copies into a buffer WebCrypto will accept.
  *
  * `BufferSource` excludes views backed by a `SharedArrayBuffer`, which a caller
@@ -47,16 +35,4 @@ export function concatBytes(...parts: readonly Uint8Array[]): Uint8Array {
     offset += part.length;
   }
   return result;
-}
-
-/**
- * Best-effort clearing of a mutable secret buffer.
- *
- * This is deliberately not a guarantee of zeroization. A managed runtime may
- * have copied these bytes during garbage collection, buffer growth, or swap,
- * and those copies are unreachable from here. Callers must not rely on this to
- * erase every trace of a secret.
- */
-export function clearBytes(secret: Uint8Array): void {
-  secret.fill(0);
 }
