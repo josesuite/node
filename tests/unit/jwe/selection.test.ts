@@ -462,6 +462,48 @@ describe('structural consistency with the named algorithm', () => {
       expect(result.reason).toBe('tag_wrong_length');
     }
   });
+
+  test('rejects octets shifted across the ciphertext and tag boundary', async () => {
+    // Each case preserves `ciphertext || tag`, so an implementation that
+    // concatenated the members before authenticating would accept them all.
+    const alice = signer('alice');
+    const serialized = await encryptTo([alice]);
+    const parsed = JSON.parse(serialized);
+    const ciphertext = Buffer.from(parsed.ciphertext, 'base64url');
+    const tag = Buffer.from(parsed.tag, 'base64url');
+    const joined = Buffer.concat([ciphertext, tag]);
+
+    const shifted = [
+      // One octet moved from the ciphertext into the tag, and the reverse.
+      { ciphertext: joined.subarray(0, ciphertext.length - 1), tag: joined.subarray(ciphertext.length - 1) },
+      { ciphertext: joined.subarray(0, ciphertext.length + 1), tag: joined.subarray(ciphertext.length + 1) },
+      // Every octet on one side of the boundary.
+      { ciphertext: joined, tag: Buffer.alloc(0) },
+      { ciphertext: Buffer.alloc(0), tag: joined },
+    ];
+
+    for (const members of shifted) {
+      const candidate = JSON.stringify({
+        ...parsed,
+        ciphertext: members.ciphertext.toString('base64url'),
+        tag: members.tag.toString('base64url'),
+      });
+
+      // An emptied member is refused as malformed structure before decryption,
+      // a wrongly sized one during it; either layer rejecting is correct.
+      const parsedJson = parseJson(new TextEncoder().encode(candidate), LIMITS_V1);
+      if (!parsedJson.ok) {
+        throw new Error('bad serialization');
+      }
+      const structure = parseJsonJwe(parsedJson.value, LIMITS_V1);
+      if (!structure.ok) {
+        continue;
+      }
+
+      const result = await decrypt(candidate, [{ principalId: 'alice', key: alice.decryption }]);
+      expect(result.ok).toBe(false);
+    }
+  });
 });
 
 describe('creation refuses unusable configurations', () => {
