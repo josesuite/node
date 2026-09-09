@@ -9,6 +9,7 @@ import {
   wrapGcmKw,
 } from '../../../src/algorithms/jwe/aes-gcm-kw.ts';
 import { keyManagementShape } from '../../../src/algorithms/jwe/index.ts';
+import { flipBit } from '../../helpers/runtime.ts';
 
 const ALGORITHMS = ['A128GCMKW', 'A192GCMKW', 'A256GCMKW'] as const;
 
@@ -103,7 +104,7 @@ describe('authentication failures', () => {
     if (!result.ok) {
       throw new Error('wrap failed');
     }
-    return { kek, iv, cek, ...result.value };
+    return { kek, cek, ...result.value };
   }
 
   test('rejects a wrong KEK', async () => {
@@ -120,8 +121,7 @@ describe('authentication failures', () => {
 
   test('rejects a modified wrapped key', async () => {
     const { kek, iv, encryptedKey, tag } = await wrapped();
-    const modified = new Uint8Array(encryptedKey);
-    modified[0] ^= 0x01;
+    const modified = flipBit(encryptedKey);
 
     const result = await unwrapGcmKw('A256GCMKW', kek, iv, modified, tag);
     expect(result.ok).toBe(true);
@@ -132,8 +132,7 @@ describe('authentication failures', () => {
 
   test('rejects a modified wrapping tag', async () => {
     const { kek, iv, encryptedKey, tag } = await wrapped();
-    const modified = new Uint8Array(tag);
-    modified[0] ^= 0x01;
+    const modified = flipBit(tag);
 
     const result = await unwrapGcmKw('A256GCMKW', kek, iv, encryptedKey, modified);
     expect(result.ok).toBe(true);

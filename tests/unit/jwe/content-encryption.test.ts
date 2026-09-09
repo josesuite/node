@@ -4,6 +4,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { CBC_IV_BYTES, cbcHmacParameters } from '../../../src/algorithms/content-encryption/aes-cbc-hmac.ts';
 import { GCM_IV_BYTES, GCM_TAG_BYTES } from '../../../src/algorithms/content-encryption/aes-gcm.ts';
 import { contentEncryptionShape, openContent, sealContent } from '../../../src/algorithms/content-encryption/index.ts';
+import { flipBit } from '../../helpers/runtime.ts';
 
 const GCM = ['A128GCM', 'A192GCM', 'A256GCM'] as const;
 const CBC = ['A128CBC-HS256', 'A192CBC-HS384', 'A256CBC-HS512'] as const;
@@ -123,8 +124,7 @@ describe('authentication failures', () => {
   for (const algorithm of ALL) {
     test(`${algorithm} rejects a modified ciphertext`, async () => {
       const { cek, iv, ciphertext, tag } = await seal(algorithm);
-      const modified = new Uint8Array(ciphertext);
-      modified[0] ^= 0x01;
+      const modified = flipBit(ciphertext);
 
       const opened = await openContent(algorithm, cek, iv, modified, tag, AAD);
       // Authentication failure is a successful outcome carrying no plaintext,
@@ -137,8 +137,7 @@ describe('authentication failures', () => {
 
     test(`${algorithm} rejects a modified tag`, async () => {
       const { cek, iv, ciphertext, tag } = await seal(algorithm);
-      const modified = new Uint8Array(tag);
-      modified[0] ^= 0x01;
+      const modified = flipBit(tag);
 
       const opened = await openContent(algorithm, cek, iv, ciphertext, modified, AAD);
       expect(opened.ok).toBe(true);
@@ -335,8 +334,7 @@ describe('CBC-HMAC construction detail', () => {
     const parameters = cbcHmacParameters(algorithm)!;
     const { cek, iv, ciphertext } = await seal(algorithm);
 
-    const corrupted = new Uint8Array(ciphertext);
-    corrupted[corrupted.length - 1] ^= 0xff;
+    const corrupted = flipBit(ciphertext, ciphertext.length - 1, 0xff);
 
     const lengthBlock = new Uint8Array(8);
     new DataView(lengthBlock.buffer).setBigUint64(0, BigInt(AAD.length) * 8n);

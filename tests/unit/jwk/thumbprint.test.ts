@@ -37,7 +37,7 @@ describe('JWK thumbprints', () => {
 
   test('ignores metadata already excluded from imported identity', () => {
     const jwk = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ format: 'jwk' });
-    expect(thumbprint(imported(jwk))).toBe(thumbprint(imported({ ...jwk, kid: 'renamed', use: 'sig' })));
+    expect(thumbprint(imported(jwk))).toBe(thumbprint(imported({ ...jwk, kid: 'renamed', use: 'sig' } as JsonWebKey)));
   });
 
   test('rejects a caller-assembled key record', () => {

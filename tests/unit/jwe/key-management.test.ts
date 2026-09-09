@@ -20,7 +20,7 @@ import {
 } from '../../../src/algorithms/jwe/ecdh-es.ts';
 import { decryptRsaOaep, encryptRsaOaep, oaepHash } from '../../../src/algorithms/jwe/rsaes-oaep.ts';
 import type { EcMaterial, OkpMaterial, RsaPrivateMaterial } from '../../../src/key/validation.ts';
-import { supportsCurve } from '../../helpers/runtime.ts';
+import { flipBit, supportsCurve } from '../../helpers/runtime.ts';
 
 const b64u = (value: unknown) => new Uint8Array(Buffer.from(String(value), 'base64url'));
 
@@ -168,8 +168,7 @@ describe('AES key wrapping', () => {
       }
 
       for (const index of [0, 8, wrapped.value.length - 1]) {
-        const modified = new Uint8Array(wrapped.value);
-        modified[index] ^= 0x01;
+        const modified = flipBit(wrapped.value, index);
 
         const unwrapped = await unwrapAesKw(algorithm, kek, modified);
         expect(unwrapped.ok).toBe(true);
@@ -250,6 +249,7 @@ describe('RSAES-OAEP', () => {
       dp: b64u(jwk.dp),
       dq: b64u(jwk.dq),
       qi: b64u(jwk.qi),
+      modulusBits: 2048,
     };
   }
 
@@ -321,8 +321,7 @@ describe('RSAES-OAEP', () => {
       throw new Error('encrypt failed');
     }
 
-    const modified = new Uint8Array(encrypted.value);
-    modified[modified.length - 1] ^= 0x01;
+    const modified = flipBit(encrypted.value, encrypted.value.length - 1);
 
     const decrypted = await decryptRsaOaep('RSA-OAEP-256', key, modified);
     expect(decrypted.ok).toBe(true);
@@ -400,7 +399,7 @@ describe('ECDH-ES agreement', () => {
       expect(senderSide.ok && recipientSide.ok).toBe(true);
       if (senderSide.ok && recipientSide.ok) {
         expect(senderSide.value).toEqual(recipientSide.value);
-        expect(senderSide.value.length).toBe(agreementFieldBytes(curve));
+        expect(senderSide.value.length).toBe(agreementFieldBytes(curve)!);
       }
     });
 
@@ -419,8 +418,7 @@ describe('ECDH-ES agreement', () => {
 
     test(`${curve} rejects an off-curve peer point`, async () => {
       const recipient = ecMaterial(curve);
-      const offCurve = new Uint8Array(recipient.x);
-      offCurve[0] ^= 0xff;
+      const offCurve = flipBit(recipient.x, 0, 0xff);
 
       const result = await agree(recipient, { curve, x: offCurve, y: recipient.y });
       expect(result.ok).toBe(false);
@@ -454,7 +452,7 @@ describe('ECDH-ES agreement', () => {
       expect(senderSide.ok && recipientSide.ok).toBe(true);
       if (senderSide.ok && recipientSide.ok) {
         expect(senderSide.value).toEqual(recipientSide.value);
-        expect(senderSide.value.length).toBe(agreementFieldBytes(curve));
+        expect(senderSide.value.length).toBe(agreementFieldBytes(curve)!);
       }
     });
 

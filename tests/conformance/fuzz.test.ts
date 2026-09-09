@@ -30,10 +30,11 @@ describe('bounded parser fuzz regressions', () => {
 
       const json = parseJson(input, LIMITS_V1);
       if (json.ok) {
-        expect(() => parseJsonJws(json.value, LIMITS_V1)).not.toThrow();
-        expect(() => parseJsonJwe(json.value, LIMITS_V1)).not.toThrow();
-        if (isJsonObject(json.value)) {
-          expect(() => importKey(json.value, { algorithm: 'HS256', operation: 'verify' })).not.toThrow();
+        const value = json.value;
+        expect(() => parseJsonJws(value, LIMITS_V1)).not.toThrow();
+        expect(() => parseJsonJwe(value, LIMITS_V1)).not.toThrow();
+        if (isJsonObject(value)) {
+          expect(() => importKey(value, { algorithm: 'HS256', operation: 'verify' })).not.toThrow();
         }
       }
       expect(() => decodeBase64url(new TextDecoder().decode(input), LIMITS_V1.payload)).not.toThrow();
@@ -53,10 +54,13 @@ describe('bounded parser fuzz regressions', () => {
       const before = input.slice();
       const json = parseJson(input, LIMITS_V1);
 
-      if (json.ok && isJsonObject(json.value)) {
-        expect(() => parseJsonJws(json.value, LIMITS_V1)).not.toThrow();
-        expect(() => parseJsonJwe(json.value, LIMITS_V1)).not.toThrow();
-        expect(() => importKey(json.value, { algorithm: 'HS256', operation: 'verify' })).not.toThrow();
+      if (json.ok) {
+        const value = json.value;
+        if (isJsonObject(value)) {
+          expect(() => parseJsonJws(value, LIMITS_V1)).not.toThrow();
+          expect(() => parseJsonJwe(value, LIMITS_V1)).not.toThrow();
+          expect(() => importKey(value, { algorithm: 'HS256', operation: 'verify' })).not.toThrow();
+        }
       }
       expect(input).toEqual(before);
     }

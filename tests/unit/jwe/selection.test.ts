@@ -20,7 +20,11 @@ function object(value: Record<string, unknown>): JsonObject {
   return result.value;
 }
 
-function key(jwk: Record<string, unknown>, algorithm: string, operation: 'wrapKey' | 'unwrapKey'): UsableKey {
+function key(
+  jwk: Record<string, unknown>,
+  algorithm: string,
+  operation: 'encrypt' | 'wrapKey' | 'unwrapKey',
+): UsableKey {
   const result = importKey(object(jwk), {
     algorithm,
     operation,
