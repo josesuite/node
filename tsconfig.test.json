@@ -2,7 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     // Environment setup
-    "types": ["node", "bun"],
+    "types": ["node"],
     "rootDir": ".",
 
     // Check only; the build config owns emit
