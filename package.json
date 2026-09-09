@@ -19,6 +19,12 @@
   },
   "type": "module",
   "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "lint": "oxlint",
@@ -26,18 +32,17 @@
     "format": "oxfmt --check",
     "format:fix": "oxfmt",
     "build": "tsc",
-    "test": "bun test",
-    "test:coverage": "bun test --coverage-reporter=lcov"
+    "test": "node --import=tsx --test",
+    "test:coverage": "node --import=tsx --test --experimental-test-coverage"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.2",
     "@types/node": "^26.5.0",
     "oxfmt": "^0.67.0",
     "oxlint": "^1.82.0",
+    "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   },
   "engines": {
-    "bun": ">=1.4.2 <2.0.0",
-    "node": "^20.20.2"
+    "node": ">=20.20.0"
   }
 }
