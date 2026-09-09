@@ -9,6 +9,7 @@ import { createJwt, createJwtWithRandom } from '../../../src/jwt/create.ts';
 import { createJwtProfile } from '../../../src/jwt/profile.ts';
 import type { ReplayStore } from '../../../src/jwt/types.ts';
 import { validateJwt } from '../../../src/jwt/validate.ts';
+import { encryptCompact } from '../../../src/jwe/compact.ts';
 import { composeNonce, type NonceAllocator, type NonceResult } from '../../../src/jwe/nonce.ts';
 import { signCompact } from '../../../src/jws/sign.ts';
 import { importKey } from '../../../src/key/import.ts';
@@ -55,8 +56,8 @@ function rsaKeys() {
   return { signing: signing.key, verification: verification.key };
 }
 
-function encryptionKeys() {
-  const material = { kty: 'oct', k: Buffer.alloc(32, 7).toString('base64url') };
+function encryptionKeys(fill = 7) {
+  const material = { kty: 'oct', k: Buffer.alloc(32, fill).toString('base64url') };
   const encryption = importKey(jsonObject(material), {
     algorithm: 'A256KW',
     operation: 'wrapKey',
@@ -291,23 +292,38 @@ describe('JWT profiles', () => {
     if (!configured.ok) {
       throw new Error(configured.reason);
     }
+    const encryptionOptions = {
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'create'),
+      contentAlgorithm: 'A128GCM',
+      recipients: [{ key: encryption.encryption }],
+      random: systemRandom,
+      nonceAllocator: allocator(),
+    };
     const created = await createJwt({
       profile: configured.profile,
       limits: LIMITS_V1,
       claims: CLAIMS,
       signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: signing.signing },
-      encryption: {
-        keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'create'),
-        contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'create'),
-        contentAlgorithm: 'A128GCM',
-        recipients: [{ key: encryption.encryption }],
-        random: systemRandom,
-        nonceAllocator: allocator(),
-      },
+      encryption: encryptionOptions,
     });
     if (!created.ok) {
       throw new Error(created.reason);
     }
+    for (const recipients of [[], [{ key: encryptionKeys(8).encryption }]]) {
+      const rejected = await createJwt({
+        profile: configured.profile,
+        limits: LIMITS_V1,
+        claims: CLAIMS,
+        signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: signing.signing },
+        encryption: { ...encryptionOptions, recipients },
+      });
+      assert.strictEqual(rejected.ok, false);
+      if (!rejected.ok) {
+        assert.strictEqual(rejected.reason, 'encryption_key_not_bound_to_profile');
+      }
+    }
+
     clockReads = 0;
     const validated = await validateJwt(created.token, { profile: configured.profile, limits: LIMITS_V1 });
     assert.strictEqual(validated.ok, true);
@@ -502,6 +518,186 @@ describe('JWT profiles', () => {
       assert.strictEqual(Object.isFrozen(result.value.claims['extension']), true);
       assert.strictEqual(result.value.claims['exp'], 1_100n);
     }
+  });
+});
+
+describe('nested JWE to JWS chain', () => {
+  function nested() {
+    const signing = keys();
+    const encryption = encryptionKeys();
+    const configured = createJwtProfile({
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWE -> JWS -> claims',
+      clock: { now: () => 1_000n },
+      subject: () => true,
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: signing.verification,
+        principalId: 'https://issuer.example',
+      },
+      decryption: {
+        keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'receive'),
+        contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'receive'),
+        recipients: [{ principalId: 'recipient', key: encryption.decryption }],
+        principalId: 'recipient',
+      },
+    });
+    if (!configured.ok) {
+      throw new Error(configured.reason);
+    }
+    return { profile: configured.profile, signing, encryption };
+  }
+
+  /** Wraps arbitrary plaintext in the outer JWE, so the inner layer can be malformed on purpose. */
+  async function wrap(
+    fixture: ReturnType<typeof nested>,
+    plaintext: Uint8Array,
+    protectedHeader: Readonly<Record<string, string | boolean | string[]>> = { cty: 'JWT' },
+  ) {
+    const result = await encryptCompact(plaintext, {
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'create'),
+      contentAlgorithm: 'A128GCM',
+      recipients: [{ key: fixture.encryption.encryption }],
+      random: systemRandom,
+      nonceAllocator: allocator(),
+      limits: LIMITS_V1,
+      protectedHeader,
+    });
+    if (!result.ok) {
+      throw new Error(result.reason);
+    }
+    return result.token;
+  }
+
+  test('requires the nested content type to be present, protected, and application/jwt', async () => {
+    // Inferring the nested type from the plaintext's shape would let the sender
+    // decide how their own bytes are interpreted.
+    const fixture = nested();
+    const inner = new TextEncoder().encode('unused');
+
+    for (const header of [{}, { cty: 'application/json' }, { cty: 'not a media type' }]) {
+      const token = await wrap(fixture, inner, header);
+      const result = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
+
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.stage, 'nested_layer');
+        assert.strictEqual(result.category, 'token_type_mismatch');
+        assert.strictEqual(result.reason, 'nested_cty_mismatch');
+      }
+    }
+  });
+
+  test('rejects a nested layer that is not valid UTF-8', async () => {
+    // Fatal decoding rather than replacement characters: substituting would
+    // alter the very token about to be verified.
+    const fixture = nested();
+    const token = await wrap(fixture, new Uint8Array([0xff, 0xfe, 0xfd]));
+
+    const result = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.stage, 'nested_layer');
+      assert.strictEqual(result.category, 'invalid_encoding');
+      assert.strictEqual(result.reason, 'inner_jwt_invalid_utf8');
+    }
+  });
+
+  test('requires the nested layer to be a compact JWS', async () => {
+    const fixture = nested();
+
+    for (const inner of ['a.b', 'a.b.c.d.e', 'a.b.c~disclosure', '{}']) {
+      const token = await wrap(fixture, new TextEncoder().encode(inner));
+      const result = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
+
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.stage, 'nested_layer');
+        assert.strictEqual(result.reason, 'inner_layer_must_be_compact_jws');
+      }
+    }
+  });
+
+  test('rejects a signed token where the profile declares an encrypted chain', async () => {
+    // The profile fixes the structure, so a bare JWS cannot stand in for the
+    // JWE the configuration requires.
+    const fixture = nested();
+    const bare = await signCompact(new TextEncoder().encode(JSON.stringify(CLAIMS)), {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      key: fixture.signing.signing,
+      limits: LIMITS_V1,
+      protectedHeader: { typ: 'project+jwt' },
+    });
+    if (!bare.ok) {
+      throw new Error(bare.reason);
+    }
+
+    const result = await validateJwt(bare.token, { profile: fixture.profile, limits: LIMITS_V1 });
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'jwt_chain_mismatch');
+    }
+  });
+
+  test('requires a replicated outer claim to be protected and to agree exactly', async () => {
+    // A replica is readable before decryption, so a disagreeing one would let
+    // the two layers describe different tokens to different readers.
+    const fixture = nested();
+    const innerToken = await signCompact(new TextEncoder().encode(JSON.stringify(CLAIMS)), {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      key: fixture.signing.signing,
+      limits: LIMITS_V1,
+      protectedHeader: { typ: 'project+jwt' },
+    });
+    if (!innerToken.ok) {
+      throw new Error(innerToken.reason);
+    }
+    const inner = new TextEncoder().encode(innerToken.token);
+
+    const agreeing = await wrap(fixture, inner, { cty: 'JWT', iss: CLAIMS.iss, aud: CLAIMS.aud });
+    assert.strictEqual((await validateJwt(agreeing, { profile: fixture.profile, limits: LIMITS_V1 })).ok, true);
+
+    for (const [name, replica] of [
+      ['iss', 'https://attacker.example'],
+      ['sub', 'mallory'],
+      ['aud', 'other-api'],
+    ] as const) {
+      const token = await wrap(fixture, inner, { cty: 'JWT', [name]: replica });
+      const result = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
+
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.category, 'claim_validation_failure');
+        assert.strictEqual(result.reason, `replicated_${name}_mismatch`);
+      }
+    }
+  });
+
+  test('accepts a replicated audience in either permitted encoding', async () => {
+    // A bare string and a single-element array denote the same audience, so the
+    // replica must compare as a set rather than by JSON shape.
+    const fixture = nested();
+    const innerToken = await signCompact(new TextEncoder().encode(JSON.stringify({ ...CLAIMS, aud: ['api'] })), {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      key: fixture.signing.signing,
+      limits: LIMITS_V1,
+      protectedHeader: { typ: 'project+jwt' },
+    });
+    if (!innerToken.ok) {
+      throw new Error(innerToken.reason);
+    }
+    const inner = new TextEncoder().encode(innerToken.token);
+
+    const token = await wrap(fixture, inner, { cty: 'JWT', aud: 'api' });
+
+    assert.strictEqual((await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 })).ok, true);
   });
 });
 
