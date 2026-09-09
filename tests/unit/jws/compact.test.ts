@@ -651,6 +651,19 @@ describe('creation guards', () => {
     }
   });
 
+  test('preserves a protected header named __proto__', async () => {
+    const { signing } = ecPair();
+    const token = await signWith(signing, 'ES256', PAYLOAD, {
+      protectedHeader: { ['__proto__']: 'value' },
+    });
+    const [protectedComponent] = token.split('.');
+
+    assert.deepStrictEqual(JSON.parse(Buffer.from(protectedComponent!, 'base64url').toString()), {
+      ['__proto__']: 'value',
+      alg: 'ES256',
+    });
+  });
+
   test('refuses to create with an algorithm outside the policy', async () => {
     const { signing } = ecPair();
     const result = await signCompact(PAYLOAD, {
@@ -674,6 +687,35 @@ describe('creation guards', () => {
     assert.strictEqual(result.ok, false);
     if (!result.ok) {
       assert.strictEqual(result.category, 'resource_limit');
+    }
+  });
+
+  test('refuses a private key bound to verification', async () => {
+    const generated = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const privateJwk = generated.privateKey.export({ format: 'jwk' }) as unknown as Record<string, unknown>;
+    const result = await signCompact(PAYLOAD, {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      key: key(privateJwk, 'ES256', 'verify'),
+      limits: LIMITS_V1,
+    });
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'key_operation_mismatch');
+    }
+  });
+
+  test('bounds the protected header size', async () => {
+    const { signing } = ecPair();
+    const result = await signCompact(PAYLOAD, {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      key: signing,
+      limits: lowerLimits({ headerSource: 1 }),
+    });
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'header_too_large');
     }
   });
 });
