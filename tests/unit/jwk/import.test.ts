@@ -522,6 +522,18 @@ describe('imported keys are sealed', () => {
       assert.strictEqual(signed.failure, 'operation_failed');
     }
   });
+
+  test('a record inheriting from an imported key is not usable for cryptography', async () => {
+    const result = importKey(object(ecJwk()), { algorithm: 'ES256', operation: 'sign' });
+    if (!result.ok) {
+      throw new Error(result.reason);
+    }
+
+    const forged = Object.create(result.key) as typeof result.key;
+    const signed = await signWithKey(forged, new TextEncoder().encode('input'));
+
+    assert.deepStrictEqual(signed, { ok: false, failure: 'operation_failed' });
+  });
 });
 
 describe('metadata size limits', () => {
