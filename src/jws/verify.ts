@@ -13,7 +13,8 @@
 
 import { verifyWithKey } from '../algorithms/index.ts';
 import { type ErrorCategory, type TrustStage } from '../errors/codes.ts';
-import { decodeBase64url } from '../internal/encoding/base64url.ts';
+import { decodeBase64url, encodeBase64url } from '../internal/encoding/base64url.ts';
+import { encodeUtf8 } from '../internal/encoding/utf8.ts';
 import { resolveB64, validateCritical, validateParameterTypes } from '../internal/headers/critical.ts';
 import { mergeHeaders, requireHeaderObject } from '../internal/headers/merge.ts';
 import type { MergedHeader } from '../internal/headers/types.ts';
@@ -332,5 +333,5 @@ function resolvePayload(
 }
 
 function encodeForSigning(bytes: Uint8Array): Uint8Array {
-  return new TextEncoder().encode(Buffer.from(bytes).toString('base64url'));
+  return encodeUtf8(encodeBase64url(bytes));
 }
