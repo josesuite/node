@@ -617,3 +617,46 @@ describe('claim size limits', () => {
     expect((await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 })).ok).toBe(true);
   });
 });
+
+describe('audience matching across both permitted encodings', () => {
+  async function validateWithAudience(fixture: ReturnType<typeof profile>, aud: unknown) {
+    const claims = JSON.stringify({ ...CLAIMS, aud });
+    return await validateJwt(await signed(fixture, claims), { profile: fixture.profile, limits: LIMITS_V1 });
+  }
+
+  test('accepts the configured audience as a bare string or as an array member', async () => {
+    // RFC 7519 permits both spellings for the same meaning.
+    const fixture = profile('project-jwt-v1');
+
+    for (const aud of ['api', ['api'], ['api', 'other'], ['other', 'api']]) {
+      expect((await validateWithAudience(fixture, aud)).ok).toBe(true);
+    }
+  });
+
+  test('rejects an audience list that does not contain the configured value', async () => {
+    const fixture = profile('project-jwt-v1');
+
+    for (const aud of ['other', ['other'], ['other', 'third']]) {
+      const result = await validateWithAudience(fixture, aud);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.category).toBe('audience_mismatch');
+      }
+    }
+  });
+
+  test('rejects malformed audience encodings before any mismatch is considered', async () => {
+    // Structural defects, not the wrong recipient: an empty or duplicated list
+    // makes the intended audience set ambiguous rather than merely unmatched.
+    const fixture = profile('project-jwt-v1');
+
+    for (const aud of [[], ['api', 'api'], ['api', 1], ['api', ''], [['api']], 1, null, {}]) {
+      const result = await validateWithAudience(fixture, aud);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.category).toBe('claim_validation_failure');
+        expect(result.reason).toBe('required_claim_missing_or_invalid');
+      }
+    }
+  });
+});
