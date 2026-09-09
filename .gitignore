@@ -8,8 +8,6 @@
 
 ### JetBrains
 /.idea/*
-!/.idea/dictionaries/
-!/.idea/dictionaries/*.xml
 
 ### Visual Studio Code
 /.vscode/*
@@ -47,6 +45,7 @@ ehthumbs_vista.db
 *.log
 *.snapshot
 .env
+lcov.info
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
