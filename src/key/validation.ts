@@ -421,7 +421,7 @@ export function validateOkpMaterial(
   jwk: JsonObject,
   curve: OkpCurve,
   derivePublicKey: (curve: string, privateKey: Uint8Array) => { ok: true; value: Uint8Array } | { ok: false },
-  validateSigningPublicKey: (encoded: Uint8Array) => string | undefined,
+  validateSigningPublicKey?: (encoded: Uint8Array) => string | undefined,
 ): { readonly ok: true; readonly material: OkpMaterial } | MaterialRejection {
   const sizes = OKP_KEY_BYTES[curve];
   // As for EC, decoding allows more than the exact size so a wrong-length value
@@ -438,6 +438,9 @@ export function validateOkpMaterial(
   }
 
   if (curve === 'Ed25519') {
+    if (validateSigningPublicKey === undefined) {
+      return reject('ed25519_validator_unavailable', 'unsupported_algorithm');
+    }
     const failure = validateSigningPublicKey(xResult.bytes);
     if (failure !== undefined) {
       return reject(`ed25519_${failure}`);
