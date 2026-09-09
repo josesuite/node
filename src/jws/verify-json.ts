@@ -13,7 +13,7 @@
 
 import { verifyWithKey } from '../algorithms/index.ts';
 import type { ErrorCategory, TrustStage } from '../errors/codes.ts';
-import { decodeBase64url } from '../internal/encoding/base64url.ts';
+import { decodeBase64url, encodeBase64url } from '../internal/encoding/base64url.ts';
 import { resolveB64, validateCritical, validateParameterTypes } from '../internal/headers/critical.ts';
 import { type HeaderSource, mergeHeaders, requireHeaderObject } from '../internal/headers/merge.ts';
 import type { MergedHeader } from '../internal/headers/types.ts';
@@ -660,7 +660,7 @@ function buildEntrySigningInput(
   // unencoded mode authenticates those bytes directly.
   return encoded
     ? buildSigningInput(protectedComponent, {
-        component: Buffer.from(payload.plaintext).toString('base64url'),
+        component: encodeBase64url(payload.plaintext),
       })
     : buildSigningInput(protectedComponent, { octets: payload.plaintext });
 }

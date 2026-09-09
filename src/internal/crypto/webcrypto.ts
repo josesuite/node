@@ -80,11 +80,4 @@ export async function importJwk(
   return crypto.subtle.importKey('jwk', jwk, algorithm, extractable, usages as KeyUsage[]);
 }
 
-/**
- * Encodes library-generated key material for a JWK handed straight to the
- * provider. These bytes never reach the wire, so `Buffer` is adequate here; the
- * strict encoder remains the one to use for anything a peer will parse.
- */
-export function base64url(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64url');
-}
+export { encodeBase64url as base64url } from '../encoding/base64url.ts';

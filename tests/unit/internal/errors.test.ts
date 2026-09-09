@@ -1,41 +1,45 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { inspect } from 'node:util';
 
 import { ERROR_CATEGORIES, failure, isErrorCategory, isJoseError, JoseError, ok } from '../../../src/errors/index.ts';
 
 describe('ERROR-01 categories', () => {
   test('exposes exactly the ERROR-01 category names', () => {
-    expect([...ERROR_CATEGORIES]).toEqual([
-      'malformed_input',
-      'unsupported_serialization',
-      'invalid_encoding',
-      'invalid_header',
-      'unsupported_critical_parameter',
-      'unsupported_algorithm',
-      'prohibited_algorithm',
-      'invalid_key',
-      'incompatible_key',
-      'key_resolution_failure',
-      'signature_verification_failure',
-      'authentication_failure',
-      'claim_validation_failure',
-      'expired_token',
-      'token_not_yet_valid',
-      'issuer_mismatch',
-      'audience_mismatch',
-      'token_type_mismatch',
-      'replay_detected',
-      'resource_limit',
-      'policy_violation',
-      'backend_failure',
-    ]);
+    assert.deepStrictEqual(
+      [...ERROR_CATEGORIES],
+      [
+        'malformed_input',
+        'unsupported_serialization',
+        'invalid_encoding',
+        'invalid_header',
+        'unsupported_critical_parameter',
+        'unsupported_algorithm',
+        'prohibited_algorithm',
+        'invalid_key',
+        'incompatible_key',
+        'key_resolution_failure',
+        'signature_verification_failure',
+        'authentication_failure',
+        'claim_validation_failure',
+        'expired_token',
+        'token_not_yet_valid',
+        'issuer_mismatch',
+        'audience_mismatch',
+        'token_type_mismatch',
+        'replay_detected',
+        'resource_limit',
+        'policy_violation',
+        'backend_failure',
+      ],
+    );
   });
 
   test('keeps `not_selected` out of the error categories', () => {
     // `not_selected` is a General JWE entry status, never a category.
-    expect(isErrorCategory('not_selected')).toBe(false);
-    expect(isErrorCategory('decryption_failure')).toBe(false);
-    expect(isErrorCategory('invalid_key')).toBe(true);
+    assert.strictEqual(isErrorCategory('not_selected'), false);
+    assert.strictEqual(isErrorCategory('decryption_failure'), false);
+    assert.strictEqual(isErrorCategory('invalid_key'), true);
   });
 });
 
@@ -49,14 +53,14 @@ describe('ERROR-02 sanitized diagnostics', () => {
     });
 
     const serialized = JSON.stringify(error);
-    expect(serialized).not.toContain('secret-bearing');
-    expect(JSON.parse(serialized)).toEqual({
+    assert.ok(!serialized.includes('secret-bearing'));
+    assert.deepStrictEqual(JSON.parse(serialized), {
       category: 'backend_failure',
       stage: 'cryptographic',
       reason: 'provider_unavailable',
     });
     // The cause stays reachable in-process for trusted debugging.
-    expect(error.cause).toBeInstanceOf(Error);
+    assert.ok(error.cause instanceof Error);
   });
 
   test('omits the backend cause from Node inspection', () => {
@@ -68,9 +72,9 @@ describe('ERROR-02 sanitized diagnostics', () => {
     });
 
     const inspected = inspect(error);
-    expect(inspected).toContain("category: 'backend_failure'");
-    expect(inspected).not.toContain('secret-bearing');
-    expect(inspected).not.toContain('cause');
+    assert.ok(inspected.includes("category: 'backend_failure'"));
+    assert.ok(!inspected.includes('secret-bearing'));
+    assert.ok(!inspected.includes('cause'));
   });
 
   test('message carries only the category and reason slug', () => {
@@ -81,8 +85,8 @@ describe('ERROR-02 sanitized diagnostics', () => {
       location: 'protected.alg',
     });
 
-    expect(error.message).toBe('invalid_header: missing_alg');
-    expect(error.toDiagnostic()).toEqual({
+    assert.strictEqual(error.message, 'invalid_header: missing_alg');
+    assert.deepStrictEqual(error.toDiagnostic(), {
       category: 'invalid_header',
       stage: 'header',
       reason: 'missing_alg',
@@ -97,7 +101,7 @@ describe('ERROR-02 sanitized diagnostics', () => {
       reason: 'payload_too_large',
     });
 
-    expect(Object.hasOwn(error.toDiagnostic(), 'location')).toBe(false);
+    assert.strictEqual(Object.hasOwn(error.toDiagnostic(), 'location'), false);
   });
 
   test('is recognizable as a JoseError', () => {
@@ -107,19 +111,19 @@ describe('ERROR-02 sanitized diagnostics', () => {
       reason: 'invalid_threshold',
     });
 
-    expect(isJoseError(error)).toBe(true);
-    expect(isJoseError(new Error('other'))).toBe(false);
-    expect(error).toBeInstanceOf(Error);
-    expect(error.name).toBe('JoseError');
+    assert.strictEqual(isJoseError(error), true);
+    assert.strictEqual(isJoseError(new Error('other')), false);
+    assert.ok(error instanceof Error);
+    assert.strictEqual(error.name, 'JoseError');
   });
 });
 
 describe('JoseResult', () => {
   test('success carries a value and failure carries an error only', () => {
     const success = ok(42);
-    expect(success.ok).toBe(true);
+    assert.strictEqual(success.ok, true);
     if (success.ok) {
-      expect(success.value).toBe(42);
+      assert.strictEqual(success.value, 42);
     }
 
     const failed = failure<number>({
@@ -128,11 +132,11 @@ describe('JoseResult', () => {
       reason: 'exp_boundary',
     });
 
-    expect(failed.ok).toBe(false);
+    assert.strictEqual(failed.ok, false);
     // A failed result has no value-shaped branch to read.
     if (!failed.ok) {
-      expect(failed.error.category).toBe('expired_token');
+      assert.strictEqual(failed.error.category, 'expired_token');
     }
-    expect(Object.hasOwn(failed, 'value')).toBe(false);
+    assert.strictEqual(Object.hasOwn(failed, 'value'), false);
   });
 });

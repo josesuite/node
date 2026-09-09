@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import * as jose from '../../src/index.ts';
 
@@ -25,15 +26,15 @@ describe('public API', () => {
       'verifyCompact',
       'verifyJson',
     ]) {
-      expect(jose[name as keyof typeof jose]).toBeFunction();
+      assert.strictEqual(typeof jose[name as keyof typeof jose], 'function');
     }
   });
 
   test('does not export internal protocol helpers', () => {
-    expect('parseJson' in jose).toBe(false);
-    expect('recoverCek' in jose).toBe(false);
-    expect('signWithKey' in jose).toBe(false);
-    expect('importKey' in jose).toBe(false);
-    expect('decryptParsed' in jose).toBe(false);
+    assert.strictEqual('parseJson' in jose, false);
+    assert.strictEqual('recoverCek' in jose, false);
+    assert.strictEqual('signWithKey' in jose, false);
+    assert.strictEqual('importKey' in jose, false);
+    assert.strictEqual('decryptParsed' in jose, false);
   });
 });

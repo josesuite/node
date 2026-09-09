@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { randomBytes } from 'node:crypto';
 
 import {
@@ -23,24 +24,24 @@ function materials(algorithm: string) {
 
 describe('parameters', () => {
   test('fixes the KEK size from the identifier', () => {
-    expect(gcmKwKeySize('A128GCMKW')).toBe(16);
-    expect(gcmKwKeySize('A192GCMKW')).toBe(24);
-    expect(gcmKwKeySize('A256GCMKW')).toBe(32);
-    expect(gcmKwKeySize('A128KW')).toBeUndefined();
+    assert.strictEqual(gcmKwKeySize('A128GCMKW'), 16);
+    assert.strictEqual(gcmKwKeySize('A192GCMKW'), 24);
+    assert.strictEqual(gcmKwKeySize('A256GCMKW'), 32);
+    assert.strictEqual(gcmKwKeySize('A128KW'), undefined);
   });
 
   test('uses a 12-octet wrapping IV and a 16-octet wrapping tag', () => {
-    expect(GCMKW_IV_BYTES).toBe(12);
-    expect(GCMKW_TAG_BYTES).toBe(16);
+    assert.strictEqual(GCMKW_IV_BYTES, 12);
+    assert.strictEqual(GCMKW_TAG_BYTES, 16);
   });
 
   test('is registered as a wrapping mode carrying an encrypted key', () => {
     for (const algorithm of ALGORITHMS) {
       const shape = keyManagementShape(algorithm);
-      expect(shape?.mode).toBe('gcm_wrapping');
-      expect(shape?.carriesEncryptedKey).toBe(true);
+      assert.strictEqual(shape?.mode, 'gcm_wrapping');
+      assert.strictEqual(shape?.carriesEncryptedKey, true);
       // Several recipients may each wrap the one common CEK.
-      expect(shape?.singleRecipientOnly).toBe(false);
+      assert.strictEqual(shape?.singleRecipientOnly, false);
     }
   });
 });
@@ -51,15 +52,15 @@ describe('round trips', () => {
       const { kek, iv, cek } = materials(algorithm);
 
       const wrapped = await wrapGcmKw(algorithm, kek, iv, cek);
-      expect(wrapped.ok).toBe(true);
+      assert.strictEqual(wrapped.ok, true);
       if (!wrapped.ok) {
         return;
       }
 
       // The wrapped key is the same length as the CEK; the tag travels apart.
-      expect(wrapped.value.encryptedKey.length).toBe(cek.length);
-      expect(wrapped.value.tag.length).toBe(GCMKW_TAG_BYTES);
-      expect(wrapped.value.iv).toEqual(iv);
+      assert.strictEqual(wrapped.value.encryptedKey.length, cek.length);
+      assert.strictEqual(wrapped.value.tag.length, GCMKW_TAG_BYTES);
+      assert.deepStrictEqual(wrapped.value.iv, iv);
 
       const unwrapped = await unwrapGcmKw(
         algorithm,
@@ -68,9 +69,9 @@ describe('round trips', () => {
         wrapped.value.encryptedKey,
         wrapped.value.tag,
       );
-      expect(unwrapped.ok).toBe(true);
+      assert.strictEqual(unwrapped.ok, true);
       if (unwrapped.ok) {
-        expect(unwrapped.value).toEqual(cek);
+        assert.deepStrictEqual(unwrapped.value, cek);
       }
     });
   }
@@ -83,15 +84,15 @@ describe('round trips', () => {
       const cek = new Uint8Array(randomBytes(size));
 
       const wrapped = await wrapGcmKw('A256GCMKW', kek, iv, cek);
-      expect(wrapped.ok).toBe(true);
+      assert.strictEqual(wrapped.ok, true);
       if (!wrapped.ok) {
         continue;
       }
 
       const unwrapped = await unwrapGcmKw('A256GCMKW', kek, iv, wrapped.value.encryptedKey, wrapped.value.tag);
-      expect(unwrapped.ok).toBe(true);
+      assert.strictEqual(unwrapped.ok, true);
       if (unwrapped.ok) {
-        expect(unwrapped.value).toEqual(cek);
+        assert.deepStrictEqual(unwrapped.value, cek);
       }
     }
   });
@@ -113,9 +114,9 @@ describe('authentication failures', () => {
 
     const result = await unwrapGcmKw('A256GCMKW', other, iv, encryptedKey, tag);
     // A failed tag is an authentication outcome, never a provider fault.
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value).toBeUndefined();
+      assert.strictEqual(result.value, undefined);
     }
   });
 
@@ -124,9 +125,9 @@ describe('authentication failures', () => {
     const modified = flipBit(encryptedKey);
 
     const result = await unwrapGcmKw('A256GCMKW', kek, iv, modified, tag);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value).toBeUndefined();
+      assert.strictEqual(result.value, undefined);
     }
   });
 
@@ -135,9 +136,9 @@ describe('authentication failures', () => {
     const modified = flipBit(tag);
 
     const result = await unwrapGcmKw('A256GCMKW', kek, iv, encryptedKey, modified);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value).toBeUndefined();
+      assert.strictEqual(result.value, undefined);
     }
   });
 
@@ -146,9 +147,9 @@ describe('authentication failures', () => {
     const other = new Uint8Array(randomBytes(GCMKW_IV_BYTES));
 
     const result = await unwrapGcmKw('A256GCMKW', kek, other, encryptedKey, tag);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value).toBeUndefined();
+      assert.strictEqual(result.value, undefined);
     }
   });
 
@@ -156,10 +157,10 @@ describe('authentication failures', () => {
     const { kek, iv, encryptedKey, tag } = await wrapped();
 
     const shortIv = await unwrapGcmKw('A256GCMKW', kek, iv.subarray(0, 8), encryptedKey, tag);
-    expect(shortIv.ok && shortIv.value === undefined).toBe(true);
+    assert.strictEqual(shortIv.ok && shortIv.value === undefined, true);
 
     const shortTag = await unwrapGcmKw('A256GCMKW', kek, iv, encryptedKey, tag.subarray(0, 8));
-    expect(shortTag.ok && shortTag.value === undefined).toBe(true);
+    assert.strictEqual(shortTag.ok && shortTag.value === undefined, true);
   });
 });
 
@@ -170,9 +171,9 @@ describe('size enforcement', () => {
 
     for (const size of [15, 17, 0]) {
       const result = await wrapGcmKw('A128GCMKW', new Uint8Array(size), iv, cek);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.failure).toBe('operation_failed');
+        assert.strictEqual(result.failure, 'operation_failed');
       }
     }
   });
@@ -185,7 +186,7 @@ describe('size enforcement', () => {
 
     for (const size of [8, 11, 13, 16]) {
       const result = await wrapGcmKw('A256GCMKW', kek, new Uint8Array(size), cek);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
     }
   });
 
@@ -198,9 +199,9 @@ describe('size enforcement', () => {
       new Uint8Array(16),
     );
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.failure).toBe('unsupported');
+      assert.strictEqual(result.failure, 'unsupported');
     }
   });
 });
@@ -216,13 +217,13 @@ describe('nonce reuse consequence', () => {
 
     const a = await wrapGcmKw('A256GCMKW', kek, iv, first);
     const b = await wrapGcmKw('A256GCMKW', kek, iv, second);
-    expect(a.ok && b.ok).toBe(true);
+    assert.strictEqual(a.ok && b.ok, true);
     if (!a.ok || !b.ok) {
       return;
     }
 
     for (let i = 0; i < first.length; i += 1) {
-      expect(a.value.encryptedKey[i]! ^ b.value.encryptedKey[i]!).toBe(first[i]! ^ second[i]!);
+      assert.strictEqual(a.value.encryptedKey[i]! ^ b.value.encryptedKey[i]!, first[i]! ^ second[i]!);
     }
   });
 });

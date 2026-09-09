@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { createHmac, generateKeyPairSync, randomBytes } from 'node:crypto';
 
 import { parseJson } from '../../../src/internal/json/parse.ts';
@@ -73,53 +74,53 @@ async function verifyWith(token: string, k: UsableKey, algorithm: string, extra 
 describe('compact structure', () => {
   test('parses exactly three components', () => {
     const result = parseCompact('aGVhZGVy.cGF5bG9hZA.c2ln', LIMITS_V1.joseInput);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.parts.protectedComponent).toBe('aGVhZGVy');
-      expect(result.parts.payloadComponent).toBe('cGF5bG9hZA');
-      expect(result.parts.signatureComponent).toBe('c2ln');
+      assert.strictEqual(result.parts.protectedComponent, 'aGVhZGVy');
+      assert.strictEqual(result.parts.payloadComponent, 'cGF5bG9hZA');
+      assert.strictEqual(result.parts.signatureComponent, 'c2ln');
     }
   });
 
   test('accepts an empty payload component for detached form', () => {
     const result = parseCompact('aGVhZGVy..c2ln', LIMITS_V1.joseInput);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.parts.payloadComponent).toBe('');
+      assert.strictEqual(result.parts.payloadComponent, '');
     }
   });
 
   test('rejects wrong component counts', () => {
-    expect(parseCompact('a.b', LIMITS_V1.joseInput).ok).toBe(false);
-    expect(parseCompact('abc', LIMITS_V1.joseInput).ok).toBe(false);
+    assert.strictEqual(parseCompact('a.b', LIMITS_V1.joseInput).ok, false);
+    assert.strictEqual(parseCompact('abc', LIMITS_V1.joseInput).ok, false);
 
     const extra = parseCompact('a.b.c.d', LIMITS_V1.joseInput);
-    expect(extra.ok).toBe(false);
+    assert.strictEqual(extra.ok, false);
     if (!extra.ok) {
-      expect(extra.reason).toBe('too_many_components');
+      assert.strictEqual(extra.reason, 'too_many_components');
     }
   });
 
   test('rejects an absent protected header or empty signature', () => {
     const noHeader = parseCompact('.cGF5.c2ln', LIMITS_V1.joseInput);
-    expect(noHeader.ok).toBe(false);
+    assert.strictEqual(noHeader.ok, false);
     if (!noHeader.ok) {
-      expect(noHeader.category).toBe('invalid_header');
+      assert.strictEqual(noHeader.category, 'invalid_header');
     }
 
     // An empty signature is the shape an unsecured object takes.
     const noSignature = parseCompact('aGVhZGVy.cGF5.', LIMITS_V1.joseInput);
-    expect(noSignature.ok).toBe(false);
+    assert.strictEqual(noSignature.ok, false);
     if (!noSignature.ok) {
-      expect(noSignature.reason).toBe('empty_signature');
+      assert.strictEqual(noSignature.reason, 'empty_signature');
     }
   });
 
   test('bounds the whole input', () => {
     const result = parseCompact('a.b.c', 4);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
+      assert.strictEqual(result.category, 'resource_limit');
     }
   });
 });
@@ -130,11 +131,11 @@ describe('round trips', () => {
     const token = await signWith(signing, 'ES256');
     const result = await verifyWith(token, verification, 'ES256');
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(new TextDecoder().decode(result.payload)).toBe('{"sub":"alice"}');
-      expect(result.principalId).toBe('signer-a');
-      expect(result.isSharedSecret).toBe(false);
+      assert.strictEqual(new TextDecoder().decode(result.payload), '{"sub":"alice"}');
+      assert.strictEqual(result.principalId, 'signer-a');
+      assert.strictEqual(result.isSharedSecret, false);
     }
   });
 
@@ -142,10 +143,10 @@ describe('round trips', () => {
     const { signing, verification } = octKey('HS256', 32);
     const result = await verifyWith(await signWith(signing, 'HS256'), verification, 'HS256');
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     // A MAC establishes the shared-secret domain, not which holder produced it.
     if (result.ok) {
-      expect(result.isSharedSecret).toBe(true);
+      assert.strictEqual(result.isSharedSecret, true);
     }
   });
 
@@ -156,7 +157,7 @@ describe('round trips', () => {
 
     for (const algorithm of ['RS256', 'PS256']) {
       const token = await signWith(key(priv, algorithm, 'sign'), algorithm);
-      expect((await verifyWith(token, key(pub, algorithm, 'verify'), algorithm)).ok).toBe(true);
+      assert.strictEqual((await verifyWith(token, key(pub, algorithm, 'verify'), algorithm)).ok, true);
     }
   });
 
@@ -165,9 +166,9 @@ describe('round trips', () => {
     const token = await signWith(signing, 'ES256', new Uint8Array());
     const result = await verifyWith(token, verification, 'ES256');
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.payload).toHaveLength(0);
+      assert.strictEqual(result.payload.length, 0);
     }
   });
 
@@ -182,7 +183,31 @@ describe('round trips', () => {
     for (const curve of availableCurves(Object.keys(byCurve))) {
       const algorithm = byCurve[curve]!;
       const { signing, verification } = ecPair(algorithm, curve);
-      expect((await verifyWith(await signWith(signing, algorithm), verification, algorithm)).ok).toBe(true);
+      assert.strictEqual((await verifyWith(await signWith(signing, algorithm), verification, algorithm)).ok, true);
+    }
+  });
+});
+
+describe('project-owned fixtures', () => {
+  test('verifies an independently serialized HMAC JWS', async () => {
+    const verification = key(
+      {
+        kty: 'oct',
+        k: 'cHJvamVjdC1vd25lZC1obWFjLWZpeHR1cmUta2V5LTMyYnl0ZXMhIQ',
+      },
+      'HS256',
+      'verify',
+    );
+    const token = [
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6InByb2plY3QrandzIn0',
+      'eyJpc3MiOiJpbnRlcm5hbCIsInN1YiI6ImFsaWNlIiwiYWRtaW4iOnRydWV9',
+      'nL-Ov1o8Avp4Uc4Riwv45TsV8CMK5YyKzM98PU4365o',
+    ].join('.');
+
+    const result = await verifyWith(token, verification, 'HS256');
+    assert.strictEqual(result.ok, true);
+    if (result.ok) {
+      assert.strictEqual(new TextDecoder().decode(result.payload), '{"iss":"internal","sub":"alice","admin":true}');
     }
   });
 });
@@ -195,10 +220,10 @@ describe('tampering is detected', () => {
     const tampered = `${header}.${Buffer.from('{"sub":"mallory"}').toString('base64url')}.${signature}`;
 
     const result = await verifyWith(tampered, verification, 'ES256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('signature_verification_failure');
-      expect(result.stage).toBe('cryptographic');
+      assert.strictEqual(result.category, 'signature_verification_failure');
+      assert.strictEqual(result.stage, 'cryptographic');
     }
   });
 
@@ -211,9 +236,9 @@ describe('tampering is detected', () => {
     const rewritten = Buffer.from(JSON.stringify({ alg: 'ES256', cty: 'text/plain' })).toString('base64url');
 
     const result = await verifyWith(`${rewritten}.${payload}.${signature}`, verification, 'ES256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('signature_verification_failure');
+      assert.strictEqual(result.category, 'signature_verification_failure');
     }
   });
 
@@ -222,9 +247,9 @@ describe('tampering is detected', () => {
     const b = ecPair();
     const result = await verifyWith(await signWith(a.signing, 'ES256'), b.verification, 'ES256');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('signature_verification_failure');
+      assert.strictEqual(result.category, 'signature_verification_failure');
     }
   });
 });
@@ -245,7 +270,7 @@ describe('kid filtering', () => {
     const token = await signWith(alice.signing, 'ES256', PAYLOAD, { protectedHeader: { kid: 'alice' } });
 
     const result = await verifyWith(token, alice.verification, 'ES256');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('an unmatched kid resolves nothing rather than using the configured key', async () => {
@@ -256,10 +281,10 @@ describe('kid filtering', () => {
     const token = await signWith(alice.signing, 'ES256', PAYLOAD, { protectedHeader: { kid: 'other' } });
 
     const result = await verifyWith(token, alice.verification, 'ES256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('key_resolution_failure');
-      expect(result.reason).toBe('kid_does_not_match_configured_key');
+      assert.strictEqual(result.category, 'key_resolution_failure');
+      assert.strictEqual(result.reason, 'kid_does_not_match_configured_key');
     }
   });
 
@@ -268,9 +293,9 @@ describe('kid filtering', () => {
     const token = await signWith(signing, 'ES256', PAYLOAD, { protectedHeader: { kid: 'named' } });
 
     const result = await verifyWith(token, verification, 'ES256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('kid_does_not_match_configured_key');
+      assert.strictEqual(result.reason, 'kid_does_not_match_configured_key');
     }
   });
 
@@ -279,7 +304,7 @@ describe('kid filtering', () => {
     const token = await signWith(alice.signing, 'ES256');
 
     const result = await verifyWith(token, alice.verification, 'ES256');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('a truncated MAC does not verify', async () => {
@@ -289,9 +314,9 @@ describe('kid filtering', () => {
     const shortened = Buffer.from(signature!, 'base64url').subarray(0, 16).toString('base64url');
 
     const result = await verifyWith(`${header}.${payload}.${shortened}`, verification, 'HS256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('signature_verification_failure');
+      assert.strictEqual(result.category, 'signature_verification_failure');
     }
   });
 });
@@ -308,11 +333,11 @@ describe('algorithm and key confusion', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
+      assert.strictEqual(result.category, 'policy_violation');
       // Policy is decided before any key work happens.
-      expect(result.stage).toBe('header');
+      assert.strictEqual(result.stage, 'header');
     }
   });
 
@@ -328,10 +353,10 @@ describe('algorithm and key confusion', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('incompatible_key');
-      expect(result.stage).toBe('key_resolution');
+      assert.strictEqual(result.category, 'incompatible_key');
+      assert.strictEqual(result.stage, 'key_resolution');
     }
   });
 
@@ -341,9 +366,9 @@ describe('algorithm and key confusion', () => {
     const { verification } = ecPair();
     const result = await verifyWith(`${header}.${Buffer.from('x').toString('base64url')}.`, verification, 'ES256');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.stage).toBe('syntax');
+      assert.strictEqual(result.stage, 'syntax');
     }
   });
 
@@ -353,9 +378,9 @@ describe('algorithm and key confusion', () => {
     const token = `${header}.${Buffer.from('x').toString('base64url')}.AAAA`;
 
     const result = await verifyWith(token, verification, 'ES256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('prohibited_algorithm');
+      assert.strictEqual(result.category, 'prohibited_algorithm');
     }
   });
 
@@ -367,9 +392,9 @@ describe('algorithm and key confusion', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('incompatible_key');
+      assert.strictEqual(result.category, 'incompatible_key');
     }
   });
 });
@@ -380,10 +405,10 @@ describe('header validation during verification', () => {
     const header = Buffer.from(JSON.stringify({ kid: 'k' })).toString('base64url');
     const result = await verifyWith(`${header}.cGF5.c2ln`, verification, 'ES256');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_header');
-      expect(result.reason).toBe('alg_missing');
+      assert.strictEqual(result.category, 'invalid_header');
+      assert.strictEqual(result.reason, 'alg_missing');
     }
   });
 
@@ -392,12 +417,12 @@ describe('header validation during verification', () => {
     const header = Buffer.from('{"alg":"ES256","alg":"none"}').toString('base64url');
     const result = await verifyWith(`${header}.cGF5.c2ln`, verification, 'ES256');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
       // A duplicate is malformed input, decided before the discarded value
       // could name a prohibited algorithm.
-      expect(result.category).toBe('malformed_input');
-      expect(result.stage).toBe('syntax');
+      assert.strictEqual(result.category, 'malformed_input');
+      assert.strictEqual(result.stage, 'syntax');
     }
   });
 
@@ -406,9 +431,9 @@ describe('header validation during verification', () => {
     const header = Buffer.from(JSON.stringify({ alg: 'ES256', ext: 'v', crit: ['ext'] })).toString('base64url');
 
     const result = await verifyWith(`${header}.cGF5.c2ln`, verification, 'ES256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('unsupported_critical_parameter');
+      assert.strictEqual(result.category, 'unsupported_critical_parameter');
     }
   });
 
@@ -417,7 +442,7 @@ describe('header validation during verification', () => {
     const token = await signWith(signing, 'ES256', PAYLOAD, {
       protectedHeader: { 'x-vendor': 'anything' },
     });
-    expect((await verifyWith(token, verification, 'ES256')).ok).toBe(true);
+    assert.strictEqual((await verifyWith(token, verification, 'ES256')).ok, true);
   });
 
   test('a JWE content-encryption name in a JWS does not dispatch a backend', async () => {
@@ -427,15 +452,15 @@ describe('header validation during verification', () => {
     const token = await signWith(signing, 'ES256', PAYLOAD, {
       protectedHeader: { enc: 'A128GCM' },
     });
-    expect((await verifyWith(token, verification, 'ES256')).ok).toBe(true);
+    assert.strictEqual((await verifyWith(token, verification, 'ES256')).ok, true);
   });
 
   test('rejects malformed Base64url in the header or signature', async () => {
     const { verification } = ecPair();
     const result = await verifyWith('not!base64.cGF5.c2ln', verification, 'ES256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_encoding');
+      assert.strictEqual(result.category, 'invalid_encoding');
     }
   });
 });
@@ -444,12 +469,12 @@ describe('detached and unencoded payloads', () => {
   test('round trips a detached payload', async () => {
     const { signing, verification } = ecPair();
     const token = await signWith(signing, 'ES256', PAYLOAD, { detached: true });
-    expect(token.split('.')[1]).toBe('');
+    assert.strictEqual(token.split('.')[1], '');
 
     const result = await verifyWith(token, verification, 'ES256', { detachedPayload: PAYLOAD });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(new TextDecoder().decode(result.payload)).toBe('{"sub":"alice"}');
+      assert.strictEqual(new TextDecoder().decode(result.payload), '{"sub":"alice"}');
     }
   });
 
@@ -460,9 +485,9 @@ describe('detached and unencoded payloads', () => {
     const result = await verifyWith(token, verification, 'ES256', {
       detachedPayload: new TextEncoder().encode('{"sub":"mallory"}'),
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('signature_verification_failure');
+      assert.strictEqual(result.category, 'signature_verification_failure');
     }
   });
 
@@ -479,9 +504,9 @@ describe('detached and unencoded payloads', () => {
     supplied.fill(0x78);
 
     const result = await pending;
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(new TextDecoder().decode(result.payload)).toBe('{"sub":"alice"}');
+      assert.strictEqual(new TextDecoder().decode(result.payload), '{"sub":"alice"}');
     }
   });
 
@@ -490,9 +515,9 @@ describe('detached and unencoded payloads', () => {
     const token = await signWith(signing, 'ES256');
 
     const result = await verifyWith(token, verification, 'ES256', { detachedPayload: PAYLOAD });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('ambiguous_payload_source');
+      assert.strictEqual(result.reason, 'ambiguous_payload_source');
     }
   });
 
@@ -511,10 +536,10 @@ describe('detached and unencoded payloads', () => {
       const result = await verifyWith(`${header}.${payload}.${signature}`, verification, 'HS256', {
         unencodedPayload: true,
       });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.category).toBe('policy_violation');
-        expect(result.reason).toBe('payload_character_not_permitted');
+        assert.strictEqual(result.category, 'policy_violation');
+        assert.strictEqual(result.reason, 'payload_character_not_permitted');
       }
     }
   });
@@ -532,9 +557,9 @@ describe('detached and unencoded payloads', () => {
     const result = await verifyWith(`${header}.${payload}.${signature}`, verification, 'HS256', {
       unencodedPayload: true,
     });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(new TextDecoder().decode(result.payload)).toBe(payload);
+      assert.strictEqual(new TextDecoder().decode(result.payload), payload);
     }
   });
 
@@ -544,12 +569,12 @@ describe('detached and unencoded payloads', () => {
     const token = await signWith(signing, 'ES256', text, { unencoded: true });
 
     // The payload travels literally, not Base64url-encoded.
-    expect(token.split('.')[1]).toBe('plain text payload');
+    assert.strictEqual(token.split('.')[1], 'plain text payload');
 
     const result = await verifyWith(token, verification, 'ES256', { unencodedPayload: true });
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(new TextDecoder().decode(result.payload)).toBe('plain text payload');
+      assert.strictEqual(new TextDecoder().decode(result.payload), 'plain text payload');
     }
   });
 
@@ -562,9 +587,9 @@ describe('detached and unencoded payloads', () => {
       unencoded: true,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('payload_character_not_permitted');
+      assert.strictEqual(result.reason, 'payload_character_not_permitted');
     }
   });
 
@@ -576,7 +601,7 @@ describe('detached and unencoded payloads', () => {
       limits: LIMITS_V1,
       unencoded: true,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
   });
 
   test('an unencoded payload not marked critical is refused on verification', async () => {
@@ -584,9 +609,9 @@ describe('detached and unencoded payloads', () => {
     const header = Buffer.from(JSON.stringify({ alg: 'ES256', b64: false })).toString('base64url');
     const result = await verifyWith(`${header}.plain.c2ln`, verification, 'ES256');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('b64_not_critical');
+      assert.strictEqual(result.reason, 'b64_not_critical');
     }
   });
 });
@@ -601,9 +626,9 @@ describe('creation guards', () => {
         limits: LIMITS_V1,
         protectedHeader: { [name]: 'x' },
       });
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.category).toBe('invalid_header');
+        assert.strictEqual(result.category, 'invalid_header');
       }
     }
   });
@@ -619,11 +644,24 @@ describe('creation guards', () => {
       protectedHeader: { typ: ['not', 'a', 'string'] },
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_header');
-      expect(result.reason).toBe('header_typ_wrong_type');
+      assert.strictEqual(result.category, 'invalid_header');
+      assert.strictEqual(result.reason, 'header_typ_wrong_type');
     }
+  });
+
+  test('preserves a protected header named __proto__', async () => {
+    const { signing } = ecPair();
+    const token = await signWith(signing, 'ES256', PAYLOAD, {
+      protectedHeader: { ['__proto__']: 'value' },
+    });
+    const [protectedComponent] = token.split('.');
+
+    assert.deepStrictEqual(JSON.parse(Buffer.from(protectedComponent!, 'base64url').toString()), {
+      ['__proto__']: 'value',
+      alg: 'ES256',
+    });
   });
 
   test('refuses to create with an algorithm outside the policy', async () => {
@@ -633,9 +671,9 @@ describe('creation guards', () => {
       key: signing,
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
+      assert.strictEqual(result.category, 'policy_violation');
     }
   });
 
@@ -646,9 +684,38 @@ describe('creation guards', () => {
       key: signing,
       limits: LIMITS_V1,
     });
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
+      assert.strictEqual(result.category, 'resource_limit');
+    }
+  });
+
+  test('refuses a private key bound to verification', async () => {
+    const generated = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const privateJwk = generated.privateKey.export({ format: 'jwk' }) as unknown as Record<string, unknown>;
+    const result = await signCompact(PAYLOAD, {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      key: key(privateJwk, 'ES256', 'verify'),
+      limits: LIMITS_V1,
+    });
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'key_operation_mismatch');
+    }
+  });
+
+  test('bounds the protected header size', async () => {
+    const { signing } = ecPair();
+    const result = await signCompact(PAYLOAD, {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      key: signing,
+      limits: lowerLimits({ headerSource: 1 }),
+    });
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'header_too_large');
     }
   });
 });
@@ -667,10 +734,10 @@ describe('resource limits reach the whole operation', () => {
       limits: lowerLimits({ cryptographicAttempts: 0 }),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
-      expect(result.reason).toBe('cryptographic_attempt_budget_exceeded');
+      assert.strictEqual(result.category, 'resource_limit');
+      assert.strictEqual(result.reason, 'cryptographic_attempt_budget_exceeded');
     }
   });
 });

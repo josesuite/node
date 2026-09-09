@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
 
 import {
@@ -26,7 +27,7 @@ function object(value: Record<string, unknown>): JsonObject {
 
 function expectNoPrivateMembers(exported: Readonly<Record<string, string>>): void {
   for (const member of PRIVATE_MEMBERS) {
-    expect(Object.hasOwn(exported, member)).toBe(false);
+    assert.strictEqual(Object.hasOwn(exported, member), false);
   }
 }
 
@@ -45,23 +46,23 @@ describe('RSA public export', () => {
 
   test('emits only the public members', () => {
     const exported = exportRsaPublicJwk(material);
-    expect(Object.keys(exported).toSorted()).toEqual(['e', 'kty', 'n']);
-    expect(exported['kty']).toBe('RSA');
+    assert.deepStrictEqual(Object.keys(exported).toSorted(), ['e', 'kty', 'n']);
+    assert.strictEqual(exported['kty'], 'RSA');
     expectNoPrivateMembers(exported);
   });
 
   test('preserves the public values exactly', () => {
     const exported = exportRsaPublicJwk(material);
-    expect(exported['n']).toBe(jwk['n']!);
-    expect(exported['e']).toBe(jwk['e']!);
+    assert.strictEqual(exported['n'], jwk['n']!);
+    assert.strictEqual(exported['e'], jwk['e']!);
   });
 
   test('does not carry CRT parameters through from the source key', () => {
     // A copy-and-delete implementation would leak these; reconstruction cannot.
     const exported = exportRsaPublicJwk(material);
     for (const crt of ['p', 'q', 'dp', 'dq', 'qi']) {
-      expect(jwk[crt]).toBeDefined();
-      expect(Object.hasOwn(exported, crt)).toBe(false);
+      assert.notStrictEqual(jwk[crt], undefined);
+      assert.strictEqual(Object.hasOwn(exported, crt), false);
     }
   });
 });
@@ -81,18 +82,18 @@ describe('EC public export', () => {
 
   test('emits only the public members', () => {
     const exported = exportEcPublicJwk(material);
-    expect(Object.keys(exported).toSorted()).toEqual(['crv', 'kty', 'x', 'y']);
+    assert.deepStrictEqual(Object.keys(exported).toSorted(), ['crv', 'kty', 'x', 'y']);
     expectNoPrivateMembers(exported);
-    expect(exported['x']).toBe(jwk['x']!);
-    expect(exported['y']).toBe(jwk['y']!);
+    assert.strictEqual(exported['x'], jwk['x']!);
+    assert.strictEqual(exported['y'], jwk['y']!);
   });
 
   test('round trips back through validation', () => {
     const exported = exportEcPublicJwk(material);
     const revalidated = validateEcMaterial(object(exported), 'P-256', deriveEcPublicPoint, validateEcPointOnCurve);
-    expect(revalidated.ok).toBe(true);
+    assert.strictEqual(revalidated.ok, true);
     if (revalidated.ok) {
-      expect(revalidated.material.d).toBeUndefined();
+      assert.strictEqual(revalidated.material.d, undefined);
     }
   });
 });
@@ -110,9 +111,9 @@ describe('OKP public export', () => {
 
   test('emits only the public members', () => {
     const exported = exportOkpPublicJwk(material);
-    expect(Object.keys(exported).toSorted()).toEqual(['crv', 'kty', 'x']);
+    assert.deepStrictEqual(Object.keys(exported).toSorted(), ['crv', 'kty', 'x']);
     expectNoPrivateMembers(exported);
-    expect(exported['x']).toBe(jwk['x']!);
+    assert.strictEqual(exported['x'], jwk['x']!);
   });
 });
 
@@ -130,27 +131,27 @@ describe('metadata handling', () => {
 
   test('includes only the metadata explicitly supplied', () => {
     const exported = exportEcPublicJwk(material, { kid: 'key-1', alg: 'ES256', use: 'sig' });
-    expect(exported['kid']).toBe('key-1');
-    expect(exported['alg']).toBe('ES256');
-    expect(exported['use']).toBe('sig');
+    assert.strictEqual(exported['kid'], 'key-1');
+    assert.strictEqual(exported['alg'], 'ES256');
+    assert.strictEqual(exported['use'], 'sig');
   });
 
   test('omits absent metadata rather than emitting undefined', () => {
     const exported = exportEcPublicJwk(material, { kid: 'key-1' });
-    expect(Object.hasOwn(exported, 'alg')).toBe(false);
-    expect(Object.hasOwn(exported, 'use')).toBe(false);
+    assert.strictEqual(Object.hasOwn(exported, 'alg'), false);
+    assert.strictEqual(Object.hasOwn(exported, 'use'), false);
   });
 
   test('does not copy unexpected properties from the metadata object', () => {
     const hostile = { kid: 'key-1', d: 'leaked', 'x-vendor': 'v' } as Record<string, string>;
     const exported = exportEcPublicJwk(material, hostile);
-    expect(Object.hasOwn(exported, 'd')).toBe(false);
-    expect(Object.hasOwn(exported, 'x-vendor')).toBe(false);
+    assert.strictEqual(Object.hasOwn(exported, 'd'), false);
+    assert.strictEqual(Object.hasOwn(exported, 'x-vendor'), false);
   });
 
   test('returns a frozen object so a caller cannot add members to it', () => {
     const exported = exportEcPublicJwk(material);
-    expect(Object.isFrozen(exported)).toBe(true);
+    assert.strictEqual(Object.isFrozen(exported), true);
   });
 });
 
@@ -158,6 +159,6 @@ describe('symmetric keys', () => {
   test('have no public representation', () => {
     // Every octet of a symmetric key is secret, so there is nothing publishable
     // and an empty or partial object would be misleading.
-    expect(() => exportOctPublicJwk()).toThrow(TypeError);
+    assert.throws(() => exportOctPublicJwk(), TypeError);
   });
 });

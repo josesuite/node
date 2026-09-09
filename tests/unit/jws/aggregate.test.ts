@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import {
   allRequiredSigners,
@@ -17,37 +18,37 @@ function policyOf(result: ReturnType<typeof namedSigner>) {
 
 describe('configuration validation', () => {
   test('rejects an empty required or eligible set', () => {
-    expect(allRequiredSigners([]).ok).toBe(false);
-    expect(thresholdOfSigners([], 1).ok).toBe(false);
+    assert.strictEqual(allRequiredSigners([]).ok, false);
+    assert.strictEqual(thresholdOfSigners([], 1).ok, false);
   });
 
   test('rejects duplicate principals in a set', () => {
     // The predicate counts distinct principals, so a duplicate makes the
     // intended set size ambiguous.
     const required = allRequiredSigners(['a', 'a']);
-    expect(required.ok).toBe(false);
+    assert.strictEqual(required.ok, false);
     if (!required.ok) {
-      expect(required.reason).toBe('required_set_duplicate');
-      expect(required.category).toBe('policy_violation');
+      assert.strictEqual(required.reason, 'required_set_duplicate');
+      assert.strictEqual(required.category, 'policy_violation');
     }
 
-    expect(thresholdOfSigners(['a', 'a'], 1).ok).toBe(false);
+    assert.strictEqual(thresholdOfSigners(['a', 'a'], 1).ok, false);
   });
 
   test('rejects an out-of-range threshold', () => {
-    expect(thresholdOfSigners(['a', 'b'], 0).ok).toBe(false);
-    expect(thresholdOfSigners(['a', 'b'], 3).ok).toBe(false);
-    expect(thresholdOfSigners(['a', 'b'], 1.5).ok).toBe(false);
+    assert.strictEqual(thresholdOfSigners(['a', 'b'], 0).ok, false);
+    assert.strictEqual(thresholdOfSigners(['a', 'b'], 3).ok, false);
+    assert.strictEqual(thresholdOfSigners(['a', 'b'], 1.5).ok, false);
 
     // The boundaries themselves are valid.
-    expect(thresholdOfSigners(['a', 'b'], 1).ok).toBe(true);
-    expect(thresholdOfSigners(['a', 'b'], 2).ok).toBe(true);
+    assert.strictEqual(thresholdOfSigners(['a', 'b'], 1).ok, true);
+    assert.strictEqual(thresholdOfSigners(['a', 'b'], 2).ok, true);
   });
 
   test('rejects an empty principal identifier', () => {
-    expect(namedSigner('').ok).toBe(false);
-    expect(allRequiredSigners(['a', '']).ok).toBe(false);
-    expect(thresholdOfSigners(['a', ''], 1).ok).toBe(false);
+    assert.strictEqual(namedSigner('').ok, false);
+    assert.strictEqual(allRequiredSigners(['a', '']).ok, false);
+    assert.strictEqual(thresholdOfSigners(['a', ''], 1).ok, false);
   });
 });
 
@@ -55,17 +56,17 @@ describe('named signer predicate', () => {
   const policy = policyOf(namedSigner('alice'));
 
   test('accepts only when the named principal is established', () => {
-    expect(isSatisfied(policy, new Set(['alice']))).toBe(true);
-    expect(isSatisfied(policy, new Set())).toBe(false);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice'])), true);
+    assert.strictEqual(isSatisfied(policy, new Set()), false);
   });
 
   test('an unrelated valid signer does not satisfy it', () => {
-    expect(isSatisfied(policy, new Set(['mallory']))).toBe(false);
-    expect(isSatisfied(policy, new Set(['bob', 'carol']))).toBe(false);
+    assert.strictEqual(isSatisfied(policy, new Set(['mallory'])), false);
+    assert.strictEqual(isSatisfied(policy, new Set(['bob', 'carol'])), false);
   });
 
   test('other principals alongside the named one do not prevent acceptance', () => {
-    expect(isSatisfied(policy, new Set(['alice', 'mallory']))).toBe(true);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice', 'mallory'])), true);
   });
 });
 
@@ -73,13 +74,13 @@ describe('all-required predicate', () => {
   const policy = policyOf(allRequiredSigners(['alice', 'bob']));
 
   test('requires every member', () => {
-    expect(isSatisfied(policy, new Set(['alice', 'bob']))).toBe(true);
-    expect(isSatisfied(policy, new Set(['alice']))).toBe(false);
-    expect(isSatisfied(policy, new Set(['bob']))).toBe(false);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice', 'bob'])), true);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice'])), false);
+    assert.strictEqual(isSatisfied(policy, new Set(['bob'])), false);
   });
 
   test('principals outside the set do not substitute for a missing member', () => {
-    expect(isSatisfied(policy, new Set(['alice', 'carol', 'dave']))).toBe(false);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice', 'carol', 'dave'])), false);
   });
 });
 
@@ -87,26 +88,29 @@ describe('threshold predicate', () => {
   const policy = policyOf(thresholdOfSigners(['alice', 'bob', 'carol'], 2));
 
   test('counts distinct eligible principals', () => {
-    expect(isSatisfied(policy, new Set(['alice', 'bob']))).toBe(true);
-    expect(isSatisfied(policy, new Set(['alice', 'carol']))).toBe(true);
-    expect(isSatisfied(policy, new Set(['alice']))).toBe(false);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice', 'bob'])), true);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice', 'carol'])), true);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice'])), false);
   });
 
   test('successful principals outside the eligible set do not count', () => {
     // Two established principals, but only one is eligible.
-    expect(isSatisfied(policy, new Set(['alice', 'mallory']))).toBe(false);
-    expect(isSatisfied(policy, new Set(['mallory', 'trent']))).toBe(false);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice', 'mallory'])), false);
+    assert.strictEqual(isSatisfied(policy, new Set(['mallory', 'trent'])), false);
   });
 
   test('exceeding the threshold still accepts', () => {
-    expect(isSatisfied(policy, new Set(['alice', 'bob', 'carol']))).toBe(true);
+    assert.strictEqual(isSatisfied(policy, new Set(['alice', 'bob', 'carol'])), true);
   });
 });
 
 describe('referenced principals', () => {
   test('reports the principals each policy depends on', () => {
-    expect([...referencedPrincipals(policyOf(namedSigner('alice')))]).toEqual(['alice']);
-    expect([...referencedPrincipals(policyOf(allRequiredSigners(['a', 'b'])))].toSorted()).toEqual(['a', 'b']);
-    expect([...referencedPrincipals(policyOf(thresholdOfSigners(['a', 'b'], 1)))].toSorted()).toEqual(['a', 'b']);
+    assert.deepStrictEqual([...referencedPrincipals(policyOf(namedSigner('alice')))], ['alice']);
+    assert.deepStrictEqual([...referencedPrincipals(policyOf(allRequiredSigners(['a', 'b'])))].toSorted(), ['a', 'b']);
+    assert.deepStrictEqual([...referencedPrincipals(policyOf(thresholdOfSigners(['a', 'b'], 1)))].toSorted(), [
+      'a',
+      'b',
+    ]);
   });
 });

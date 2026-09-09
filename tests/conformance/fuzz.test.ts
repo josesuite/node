@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import { decodeBase64url, encodeBase64url } from '../../src/internal/encoding/base64url.ts';
 import { parseJson } from '../../src/internal/json/parse.ts';
@@ -31,14 +32,14 @@ describe('bounded parser fuzz regressions', () => {
       const json = parseJson(input, LIMITS_V1);
       if (json.ok) {
         const value = json.value;
-        expect(() => parseJsonJws(value, LIMITS_V1)).not.toThrow();
-        expect(() => parseJsonJwe(value, LIMITS_V1)).not.toThrow();
+        assert.doesNotThrow(() => parseJsonJws(value, LIMITS_V1));
+        assert.doesNotThrow(() => parseJsonJwe(value, LIMITS_V1));
         if (isJsonObject(value)) {
-          expect(() => importKey(value, { algorithm: 'HS256', operation: 'verify' })).not.toThrow();
+          assert.doesNotThrow(() => importKey(value, { algorithm: 'HS256', operation: 'verify' }));
         }
       }
-      expect(() => decodeBase64url(new TextDecoder().decode(input), LIMITS_V1.payload)).not.toThrow();
-      expect(input).toEqual(before);
+      assert.doesNotThrow(() => decodeBase64url(new TextDecoder().decode(input), LIMITS_V1.payload));
+      assert.deepStrictEqual(input, before);
     }
   });
 
@@ -57,12 +58,12 @@ describe('bounded parser fuzz regressions', () => {
       if (json.ok) {
         const value = json.value;
         if (isJsonObject(value)) {
-          expect(() => parseJsonJws(value, LIMITS_V1)).not.toThrow();
-          expect(() => parseJsonJwe(value, LIMITS_V1)).not.toThrow();
-          expect(() => importKey(value, { algorithm: 'HS256', operation: 'verify' })).not.toThrow();
+          assert.doesNotThrow(() => parseJsonJws(value, LIMITS_V1));
+          assert.doesNotThrow(() => parseJsonJwe(value, LIMITS_V1));
+          assert.doesNotThrow(() => importKey(value, { algorithm: 'HS256', operation: 'verify' }));
         }
       }
-      expect(input).toEqual(before);
+      assert.deepStrictEqual(input, before);
     }
   });
 
@@ -76,8 +77,8 @@ describe('bounded parser fuzz regressions', () => {
       if (!decoded.ok) {
         throw new Error(`seed ${SEED} iteration ${iteration}: ${decoded.failure}`);
       }
-      expect(decoded.bytes).toEqual(input);
-      expect(encodeBase64url(decoded.bytes)).toBe(encoded);
+      assert.deepStrictEqual(decoded.bytes, input);
+      assert.strictEqual(encodeBase64url(decoded.bytes), encoded);
     }
   });
 });

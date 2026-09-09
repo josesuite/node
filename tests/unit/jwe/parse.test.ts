@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import { encodedLengthFor } from '../../../src/internal/encoding/base64url.ts';
 import { parseJson } from '../../../src/internal/json/parse.ts';
@@ -31,22 +32,22 @@ describe('compact form', () => {
   test('reads exactly five components', () => {
     const result = parseCompactJwe(`${HEADER}.ZWs.aXY.Y3Q.dGFn`, LIMITS_V1);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value.form).toBe('compact');
-      expect(result.value.protectedComponent).toBe(HEADER);
-      expect(result.value.recipients).toHaveLength(1);
-      expect(result.value.recipients[0]!.encryptedKeyComponent).toBe('ZWs');
-      expect(result.value.aadComponent).toBeUndefined();
+      assert.strictEqual(result.value.form, 'compact');
+      assert.strictEqual(result.value.protectedComponent, HEADER);
+      assert.strictEqual(result.value.recipients.length, 1);
+      assert.strictEqual(result.value.recipients[0]!.encryptedKeyComponent, 'ZWs');
+      assert.strictEqual(result.value.aadComponent, undefined);
     }
   });
 
   test('rejects any count other than five', () => {
     for (const token of [`${HEADER}.ZWs.aXY.Y3Q`, `${HEADER}.ZWs.aXY.Y3Q.dGFn.ZXh0cmE`, `${HEADER}.ZWs.aXY`, HEADER]) {
       const result = parseCompactJwe(token, LIMITS_V1);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('compact_component_count');
+        assert.strictEqual(result.reason, 'compact_component_count');
       }
     }
   });
@@ -56,22 +57,22 @@ describe('compact form', () => {
     // component and JSON spells it as an omitted member.
     const result = parseCompactJwe(`${HEADER}..aXY.Y3Q.dGFn`, LIMITS_V1);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value.recipients[0]!.encryptedKeyComponent).toBeUndefined();
+      assert.strictEqual(result.value.recipients[0]!.encryptedKeyComponent, undefined);
     }
   });
 
   test('accepts an empty ciphertext', () => {
     // An empty plaintext under GCM produces no ciphertext octets.
     const result = parseCompactJwe(`${HEADER}.ZWs.aXY..dGFn`, LIMITS_V1);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('requires nonempty protected, iv and tag', () => {
-    expect(parseCompactJwe(`.ZWs.aXY.Y3Q.dGFn`, LIMITS_V1).ok).toBe(false);
-    expect(parseCompactJwe(`${HEADER}.ZWs..Y3Q.dGFn`, LIMITS_V1).ok).toBe(false);
-    expect(parseCompactJwe(`${HEADER}.ZWs.aXY.Y3Q.`, LIMITS_V1).ok).toBe(false);
+    assert.strictEqual(parseCompactJwe(`.ZWs.aXY.Y3Q.dGFn`, LIMITS_V1).ok, false);
+    assert.strictEqual(parseCompactJwe(`${HEADER}.ZWs..Y3Q.dGFn`, LIMITS_V1).ok, false);
+    assert.strictEqual(parseCompactJwe(`${HEADER}.ZWs.aXY.Y3Q.`, LIMITS_V1).ok, false);
   });
 });
 
@@ -79,30 +80,30 @@ describe('JSON form selection', () => {
   test('reads the general form from a recipients array', () => {
     const result = parse(`{${BASE},"recipients":[{"encrypted_key":"ZWs"}]}`);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value.form).toBe('general');
-      expect(result.value.recipients).toHaveLength(1);
+      assert.strictEqual(result.value.form, 'general');
+      assert.strictEqual(result.value.recipients.length, 1);
     }
   });
 
   test('reads the flattened form when recipients is absent', () => {
     const result = parse(`{${BASE},"encrypted_key":"ZWs"}`);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value.form).toBe('flattened');
-      expect(result.value.recipients[0]!.encryptedKeyComponent).toBe('ZWs');
+      assert.strictEqual(result.value.form, 'flattened');
+      assert.strictEqual(result.value.recipients[0]!.encryptedKeyComponent, 'ZWs');
     }
   });
 
   test('rejects a hybrid carrying both forms', () => {
     for (const member of ['"encrypted_key":"ZWs"', '"header":{"kid":"a"}']) {
       const result = parse(`{${BASE},${member},"recipients":[{"encrypted_key":"b3Ro"}]}`);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('hybrid_serialization');
-        expect(result.category).toBe('invalid_header');
+        assert.strictEqual(result.reason, 'hybrid_serialization');
+        assert.strictEqual(result.category, 'invalid_header');
       }
     }
   });
@@ -112,9 +113,9 @@ describe('JSON form selection', () => {
     // Flattened one; zero recipients can never yield a decryptable object.
     const result = parse(`{${BASE},"recipients":[]}`);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('recipients_empty');
+      assert.strictEqual(result.reason, 'recipients_empty');
     }
   });
 
@@ -122,9 +123,9 @@ describe('JSON form selection', () => {
     const many = Array.from({ length: LIMITS_V1.recipients + 1 }, () => '{"encrypted_key":"ZWs"}').join(',');
     const result = parse(`{${BASE},"recipients":[${many}]}`);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
+      assert.strictEqual(result.category, 'resource_limit');
     }
   });
 });
@@ -145,18 +146,18 @@ describe('required members', () => {
         .join(',');
 
       const result = parse(`{${body}}`);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe(`${omitted}_missing`);
+        assert.strictEqual(result.reason, `${omitted}_missing`);
       }
     }
   });
 
   test('keeps ciphertext present but allows it to be empty', () => {
     const result = parse(`{"protected":"${HEADER}","iv":"aXY","ciphertext":"","tag":"dGFn"}`);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value.ciphertextComponent).toBe('');
+      assert.strictEqual(result.value.ciphertextComponent, '');
     }
   });
 
@@ -170,9 +171,9 @@ describe('required members', () => {
 
     for (const [text, reason] of cases) {
       const result = parse(text);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe(reason);
+        assert.strictEqual(result.reason, reason);
       }
     }
   });
@@ -180,9 +181,9 @@ describe('required members', () => {
   test('rejects a top-level value that is not an object', () => {
     for (const text of ['[]', '"s"', '42', 'null']) {
       const result = parse(text);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('jwe_not_an_object');
+        assert.strictEqual(result.reason, 'jwe_not_an_object');
       }
     }
   });
@@ -194,27 +195,27 @@ describe('empty optional values must be omitted', () => {
     // an empty member is malformed rather than an alias for absence.
     const result = parse(`{${BASE},"aad":"","encrypted_key":"ZWs"}`);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('aad_empty');
+      assert.strictEqual(result.reason, 'aad_empty');
     }
   });
 
   test('rejects an explicit empty encrypted_key', () => {
     const result = parse(`{${BASE},"encrypted_key":""}`);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('encrypted_key_empty');
+      assert.strictEqual(result.reason, 'encrypted_key_empty');
     }
   });
 
   test('rejects an empty unprotected or recipient header', () => {
-    expect(parse(`{${BASE},"unprotected":{},"encrypted_key":"ZWs"}`).ok).toBe(false);
-    expect(parse(`{${BASE},"recipients":[{"header":{},"encrypted_key":"ZWs"}]}`).ok).toBe(false);
+    assert.strictEqual(parse(`{${BASE},"unprotected":{},"encrypted_key":"ZWs"}`).ok, false);
+    assert.strictEqual(parse(`{${BASE},"recipients":[{"header":{},"encrypted_key":"ZWs"}]}`).ok, false);
   });
 
   test('accepts the same object with those members omitted', () => {
-    expect(parse(`{${BASE},"encrypted_key":"ZWs"}`).ok).toBe(true);
+    assert.strictEqual(parse(`{${BASE},"encrypted_key":"ZWs"}`).ok, true);
   });
 });
 
@@ -222,9 +223,9 @@ describe('ignorable members', () => {
   test('keeps an unknown noncritical member from changing the parse', () => {
     const result = parse(`{${BASE},"encrypted_key":"ZWs","x-vendor":"anything"}`);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value.form).toBe('flattened');
+      assert.strictEqual(result.value.form, 'flattened');
     }
   });
 });
@@ -233,18 +234,18 @@ describe('authenticated data construction', () => {
   test('uses the protected component alone when aad is absent', () => {
     const result = buildAdditionalData(HEADER, undefined);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(new TextDecoder().decode(result.bytes)).toBe(HEADER);
+      assert.strictEqual(new TextDecoder().decode(result.bytes), HEADER);
     }
   });
 
   test('joins the protected component and aad with a period', () => {
     const result = buildAdditionalData(HEADER, 'YWFk');
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(new TextDecoder().decode(result.bytes)).toBe(`${HEADER}.YWFk`);
+      assert.strictEqual(new TextDecoder().decode(result.bytes), `${HEADER}.YWFk`);
     }
   });
 
@@ -254,9 +255,9 @@ describe('authenticated data construction', () => {
     const a = buildAdditionalData('AB', 'CD');
     const b = buildAdditionalData('ABC', 'D');
 
-    expect(a.ok && b.ok).toBe(true);
+    assert.strictEqual(a.ok && b.ok, true);
     if (a.ok && b.ok) {
-      expect(a.bytes).not.toEqual(b.bytes);
+      assert.notDeepStrictEqual(a.bytes, b.bytes);
     }
   });
 
@@ -264,17 +265,17 @@ describe('authenticated data construction', () => {
     const absent = buildAdditionalData(HEADER, undefined);
     const present = buildAdditionalData(HEADER, 'YWFk');
 
-    expect(absent.ok && present.ok).toBe(true);
+    assert.strictEqual(absent.ok && present.ok, true);
     if (absent.ok && present.ok) {
-      expect(absent.bytes).not.toEqual(present.bytes);
+      assert.notDeepStrictEqual(absent.bytes, present.bytes);
     }
   });
 
   test('rejects a component holding non-ASCII', () => {
     const result = buildAdditionalData('héader', undefined);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.failure).toBe('non_ascii_component');
+      assert.strictEqual(result.failure, 'non_ascii_component');
     }
   });
 });
@@ -290,13 +291,13 @@ describe('component size bounds', () => {
 
     // A component that could not decode to more than the limit is a size the
     // parser has no reason to refuse.
-    expect(parseJsonJwe(json(withProtected(encodedLengthFor(limits.headerSource))), limits).ok).toBe(true);
+    assert.strictEqual(parseJsonJwe(json(withProtected(encodedLengthFor(limits.headerSource))), limits).ok, true);
 
     const oversized = parseJsonJwe(json(withProtected(encodedLengthFor(limits.headerSource) + 1)), limits);
-    expect(oversized.ok).toBe(false);
+    assert.strictEqual(oversized.ok, false);
     if (!oversized.ok) {
-      expect(oversized.category).toBe('resource_limit');
-      expect(oversized.reason).toBe('protected_too_large');
+      assert.strictEqual(oversized.category, 'resource_limit');
+      assert.strictEqual(oversized.reason, 'protected_too_large');
     }
   });
 
@@ -305,10 +306,10 @@ describe('component size bounds', () => {
     // replaced by its decoded value; it must still be well formed.
     const result = parse(`{${BASE},"aad":"!"}`);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('invalid_encoding');
-      expect(result.reason).toBe('aad_invalid_base64url');
+      assert.strictEqual(result.category, 'invalid_encoding');
+      assert.strictEqual(result.reason, 'aad_invalid_base64url');
     }
   });
 });

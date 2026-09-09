@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 
 import { parseJson } from '../../../src/internal/json/parse.ts';
@@ -45,52 +46,52 @@ function input(
 describe('reading a JWK Set container', () => {
   test('accepts a well-formed set', () => {
     const result = readJwksEntries(object({ keys: [ecJwk(), ecJwk()] }));
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.keys).toHaveLength(2);
+      assert.strictEqual(result.keys.length, 2);
     }
   });
 
   test('accepts an empty set that resolves no key', () => {
     const result = readJwksEntries(object({ keys: [] }));
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.keys).toHaveLength(0);
+      assert.strictEqual(result.keys.length, 0);
     }
   });
 
   test('rejects a missing or mistyped keys member', () => {
     const missing = readJwksEntries(object({}));
-    expect(missing.ok).toBe(false);
+    assert.strictEqual(missing.ok, false);
     if (!missing.ok) {
-      expect(missing.reason).toBe('keys_missing');
+      assert.strictEqual(missing.reason, 'keys_missing');
     }
 
     const mistyped = readJwksEntries(object({ keys: {} }));
-    expect(mistyped.ok).toBe(false);
+    assert.strictEqual(mistyped.ok, false);
     if (!mistyped.ok) {
-      expect(mistyped.reason).toBe('keys_not_an_array');
+      assert.strictEqual(mistyped.reason, 'keys_not_an_array');
     }
   });
 
   test('rejects a non-object entry rather than skipping it', () => {
     const result = readJwksEntries(object({ keys: [ecJwk(), 'not-a-key'] }));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('key_entry_not_an_object');
+      assert.strictEqual(result.reason, 'key_entry_not_an_object');
     }
   });
 
   test('ignores unknown members of the container', () => {
-    expect(readJwksEntries(object({ keys: [], 'x-vendor': 1 })).ok).toBe(true);
+    assert.strictEqual(readJwksEntries(object({ keys: [], 'x-vendor': 1 })).ok, true);
   });
 
   test('bounds the number of keys', () => {
     const keys = Array.from({ length: LIMITS_V1.jwksKeys + 1 }, () => ({ kty: 'oct', k: 'AA' }));
     const result = readJwksEntries(object({ keys }));
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
+      assert.strictEqual(result.category, 'resource_limit');
     }
   });
 });
@@ -102,8 +103,8 @@ describe('snapshot construction', () => {
       new TextEncoder().encode(JSON.stringify({ keys: [ecJwk({ kid: 'raw' })] })),
       [{ principalId: 'party-a', options: VERIFY_EC }],
     );
-    expect(result.ok).toBe(true);
-    expect(buildSnapshotBytes('issuer-a', new TextEncoder().encode('{"keys":[],"keys":[]}'), []).ok).toBe(false);
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(buildSnapshotBytes('issuer-a', new TextEncoder().encode('{"keys":[],"keys":[]}'), []).ok, false);
   });
 
   test('applies caller limits throughout raw snapshot construction', () => {
@@ -114,7 +115,7 @@ describe('snapshot construction', () => {
       { ...LIMITS_V1, jwksKeys: 0 },
     );
 
-    expect(result).toEqual({ ok: false, category: 'resource_limit', reason: 'too_many_keys' });
+    assert.deepStrictEqual(result, { ok: false, category: 'resource_limit', reason: 'too_many_keys' });
   });
 
   test('builds a snapshot from valid entries', () => {
@@ -123,20 +124,20 @@ describe('snapshot construction', () => {
       input(ecJwk({ kid: 'k2' }), 'signer-b'),
     ]);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.snapshot.entries).toHaveLength(2);
-      expect(result.snapshot.namespace).toBe('issuer-a');
-      expect(result.snapshot.entries[0]!.kid).toBe('k1');
-      expect([...distinctPrincipals(result.snapshot)].toSorted()).toEqual(['signer-a', 'signer-b']);
+      assert.strictEqual(result.snapshot.entries.length, 2);
+      assert.strictEqual(result.snapshot.namespace, 'issuer-a');
+      assert.strictEqual(result.snapshot.entries[0]!.kid, 'k1');
+      assert.deepStrictEqual([...distinctPrincipals(result.snapshot)].toSorted(), ['signer-a', 'signer-b']);
     }
   });
 
   test('accepts keys without an identifier', () => {
     const result = buildSnapshot('issuer-a', [input(ecJwk(), 'signer-a')]);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.snapshot.entries[0]!.kid).toBeUndefined();
+      assert.strictEqual(result.snapshot.entries[0]!.kid, undefined);
     }
   });
 
@@ -146,10 +147,10 @@ describe('snapshot construction', () => {
       input(ecJwk({ kid: 'same' }), 'signer-b'),
     ]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('duplicate_kid');
-      expect(result.index).toBe(1);
+      assert.strictEqual(result.reason, 'duplicate_kid');
+      assert.strictEqual(result.index, 1);
     }
   });
 
@@ -162,9 +163,9 @@ describe('snapshot construction', () => {
       input(ecJwk(), 'signer-c'),
     ]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.index).toBe(1);
+      assert.strictEqual(result.index, 1);
     }
   });
 
@@ -176,9 +177,9 @@ describe('snapshot construction', () => {
       input(ecJwk({ kid: 'previous' }), 'signer-a'),
     ]);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(distinctPrincipals(result.snapshot).size).toBe(1);
+      assert.strictEqual(distinctPrincipals(result.snapshot).size, 1);
     }
   });
 });
@@ -193,10 +194,10 @@ describe('one principal per key', () => {
       input({ ...shared, kid: 'b' }, 'signer-b'),
     ]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('shared_key_material_across_principals');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'shared_key_material_across_principals');
     }
   });
 
@@ -207,10 +208,21 @@ describe('one principal per key', () => {
       input({ ...shared, kid: 'b' }, 'signer-a'),
     ]);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(distinctPrincipals(result.snapshot).size).toBe(1);
+      assert.strictEqual(distinctPrincipals(result.snapshot).size, 1);
     }
+  });
+
+  test('permits identical wrapping-key bindings under one principal', () => {
+    const shared = octJwk(new Uint8Array(32).fill(4));
+    const options = { algorithm: 'A256KW', operation: 'wrapKey' as const, contentAlgorithms: ['A128GCM'] };
+    const result = buildSnapshot('recipient-a', [
+      input({ ...shared, kid: 'a' }, 'recipient-a', options),
+      input({ ...shared, kid: 'b' }, 'recipient-a', options),
+    ]);
+
+    assert.strictEqual(result.ok, true);
   });
 
   test('identifier differences do not make one key into two', () => {
@@ -220,7 +232,7 @@ describe('one principal per key', () => {
       input({ ...shared, kid: 'name-one' }, 'signer-a'),
       input({ ...shared, kid: 'name-two' }, 'signer-b'),
     ]);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
   });
 
   test('does not treat an operation alias as different key material', () => {
@@ -229,7 +241,7 @@ describe('one principal per key', () => {
       input(shared, 'party-a', { algorithm: 'HS256', operation: 'verify' }),
       input(shared, 'party-b', { algorithm: 'HS256', operation: 'sign' }),
     ]);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
   });
 });
 
@@ -246,10 +258,10 @@ describe('HMAC authentication-domain distinctness', () => {
       input(octJwk(zeroExtended, { kid: 'b' }), 'party-b', VERIFY_HS),
     ]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('equivalent_hmac_domains_across_principals');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'equivalent_hmac_domains_across_principals');
     }
   });
 
@@ -262,9 +274,9 @@ describe('HMAC authentication-domain distinctness', () => {
       input(octJwk(hashed, { kid: 'b' }), 'party-b', VERIFY_HS),
     ]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('equivalent_hmac_domains_across_principals');
+      assert.strictEqual(result.reason, 'equivalent_hmac_domains_across_principals');
     }
   });
 
@@ -278,7 +290,7 @@ describe('HMAC authentication-domain distinctness', () => {
       input(octJwk(short, { kid: 'a' }), 'party-a', VERIFY_HS),
       input(octJwk(zeroExtended, { kid: 'b' }), 'party-a', VERIFY_HS),
     ]);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('permits genuinely independent HMAC keys', () => {
@@ -287,9 +299,9 @@ describe('HMAC authentication-domain distinctness', () => {
       input(octJwk(new Uint8Array(32).fill(2), { kid: 'b' }), 'party-b', VERIFY_HS),
     ]);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(distinctPrincipals(result.snapshot).size).toBe(2);
+      assert.strictEqual(distinctPrincipals(result.snapshot).size, 2);
     }
   });
 
@@ -304,6 +316,6 @@ describe('HMAC authentication-domain distinctness', () => {
       input(octJwk(short, { kid: 'a' }), 'party-a', { algorithm: 'HS256', operation: 'verify' }),
       input(octJwk(padded, { kid: 'b' }), 'party-b', { algorithm: 'HS384', operation: 'verify' }),
     ]);
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 });

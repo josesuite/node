@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { randomBytes } from 'node:crypto';
 
 import { systemRandom } from '../../../src/internal/crypto/random.ts';
@@ -102,10 +103,10 @@ describe('recipient selection', () => {
 
     // The only entry names another principal's kid, so nothing addressed to the
     // selected principal remains and no unwrap is ever attempted.
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('key_resolution_failure');
-      expect(result.reason).toBe('no_eligible_recipient');
+      assert.strictEqual(result.category, 'key_resolution_failure');
+      assert.strictEqual(result.reason, 'no_eligible_recipient');
     }
   });
 
@@ -118,9 +119,9 @@ describe('recipient selection', () => {
 
     const result = await decrypt(serialized, [{ principalId: 'stranger', key: stranger.decryption }]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('authentication_failure');
+      assert.strictEqual(result.category, 'authentication_failure');
     }
   });
 
@@ -134,10 +135,10 @@ describe('recipient selection', () => {
 
     const result = await decrypt(serialized, [{ principalId: 'alice', key: alice.decryption }]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('key_resolution_failure');
-      expect(result.reason).toBe('ambiguous_recipient');
+      assert.strictEqual(result.category, 'key_resolution_failure');
+      assert.strictEqual(result.reason, 'ambiguous_recipient');
     }
   });
 
@@ -148,10 +149,10 @@ describe('recipient selection', () => {
 
     const result = await decrypt(serialized, [{ principalId: 'alice', key: alice.decryption }]);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.principalId).toBe('alice');
-      expect(result.plaintext).toEqual(PLAINTEXT);
+      assert.strictEqual(result.principalId, 'alice');
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
     }
   });
 
@@ -164,7 +165,7 @@ describe('recipient selection', () => {
 
     const result = await decrypt(serialized, [{ principalId: 'carol', key: signer('carol').decryption }]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
   });
 
   test('reports no eligible recipient when the algorithm is not permitted', async () => {
@@ -189,10 +190,10 @@ describe('recipient selection', () => {
       limits: LIMITS_V1,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('key_resolution_failure');
-      expect(result.reason).toBe('no_eligible_recipient');
+      assert.strictEqual(result.category, 'key_resolution_failure');
+      assert.strictEqual(result.reason, 'no_eligible_recipient');
     }
   });
 });
@@ -211,16 +212,16 @@ describe('the selected principal comes from the caller', () => {
     ];
 
     const asAlice = await decrypt(serialized, trusted, 'alice');
-    expect(asAlice.ok).toBe(false);
+    assert.strictEqual(asAlice.ok, false);
     if (!asAlice.ok) {
-      expect(asAlice.category).toBe('key_resolution_failure');
-      expect(asAlice.reason).toBe('no_eligible_recipient');
+      assert.strictEqual(asAlice.category, 'key_resolution_failure');
+      assert.strictEqual(asAlice.reason, 'no_eligible_recipient');
     }
 
     const asBob = await decrypt(serialized, trusted, 'bob');
-    expect(asBob.ok).toBe(true);
+    assert.strictEqual(asBob.ok, true);
     if (asBob.ok) {
-      expect(asBob.principalId).toBe('bob');
+      assert.strictEqual(asBob.principalId, 'bob');
     }
   });
 
@@ -230,10 +231,10 @@ describe('the selected principal comes from the caller', () => {
 
     const result = await decrypt(serialized, [{ principalId: 'alice', key: alice.decryption }], 'carol');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.stage).toBe('configuration');
-      expect(result.reason).toBe('selected_principal_has_no_trusted_key');
+      assert.strictEqual(result.stage, 'configuration');
+      assert.strictEqual(result.reason, 'selected_principal_has_no_trusted_key');
     }
   });
 
@@ -243,9 +244,9 @@ describe('the selected principal comes from the caller', () => {
 
     const result = await decrypt(serialized, [{ principalId: 'alice', key: alice.decryption }], '');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('principal_id_empty');
+      assert.strictEqual(result.reason, 'principal_id_empty');
     }
   });
 
@@ -263,11 +264,11 @@ describe('the selected principal comes from the caller', () => {
       'alice',
     );
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('ambiguous_recipient');
+      assert.strictEqual(result.reason, 'ambiguous_recipient');
       // Nothing was tried, so no entry carries a status.
-      expect(result.recipients).toBeUndefined();
+      assert.strictEqual(result.recipients, undefined);
     }
   });
 });
@@ -280,9 +281,9 @@ describe('per-entry recipient outcomes', () => {
 
     const result = await decrypt(serialized, [{ principalId: 'alice', key: alice.decryption }], 'alice');
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.recipients).toEqual([
+      assert.deepStrictEqual(result.recipients, [
         { index: 0, status: 'not_selected' },
         { index: 1, status: 'success' },
       ]);
@@ -299,9 +300,9 @@ describe('per-entry recipient outcomes', () => {
 
     const result = await decrypt(JSON.stringify(parsed), [{ principalId: 'alice', key: alice.decryption }], 'alice');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.recipients).toEqual([
+      assert.deepStrictEqual(result.recipients, [
         { index: 0, status: 'not_selected' },
         { index: 1, status: 'failed', category: 'authentication_failure' },
       ]);
@@ -331,10 +332,10 @@ describe('algorithm header placement', () => {
       'alice',
     );
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('alg_must_be_protected');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'alg_must_be_protected');
     }
   });
 
@@ -349,9 +350,9 @@ describe('algorithm header placement', () => {
       'alice',
     );
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('differing_recipient_algorithms_not_enabled');
+      assert.strictEqual(result.reason, 'differing_recipient_algorithms_not_enabled');
     }
   });
 });
@@ -374,10 +375,10 @@ describe('whole-object rejection precedes selection', () => {
 
     const result = await decrypt(JSON.stringify(parsed), [{ principalId: 'alice', key: alice.decryption }], 'alice');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('policy_violation');
-      expect(result.reason).toBe('algorithm_requires_single_recipient');
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'algorithm_requires_single_recipient');
     }
   });
 
@@ -394,9 +395,9 @@ describe('whole-object rejection precedes selection', () => {
 
     const result = await decrypt(JSON.stringify(parsed), [{ principalId: 'alice', key: alice.decryption }]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('prohibited_algorithm');
+      assert.strictEqual(result.category, 'prohibited_algorithm');
     }
   });
 
@@ -411,9 +412,9 @@ describe('whole-object rejection precedes selection', () => {
 
     const result = await decrypt(JSON.stringify(parsed), [{ principalId: 'alice', key: alice.decryption }]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.stage).toBe('header');
+      assert.strictEqual(result.stage, 'header');
     }
   });
 });
@@ -429,9 +430,9 @@ describe('structural consistency with the named algorithm', () => {
 
     const result = await decrypt(JSON.stringify(parsed), [{ principalId: 'alice', key: alice.decryption }]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('encrypted_key_presence_mismatch');
+      assert.strictEqual(result.reason, 'encrypted_key_presence_mismatch');
     }
   });
 
@@ -443,9 +444,9 @@ describe('structural consistency with the named algorithm', () => {
 
     const result = await decrypt(JSON.stringify(parsed), [{ principalId: 'alice', key: alice.decryption }]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('iv_wrong_length');
+      assert.strictEqual(result.reason, 'iv_wrong_length');
     }
   });
 
@@ -457,9 +458,51 @@ describe('structural consistency with the named algorithm', () => {
 
     const result = await decrypt(JSON.stringify(parsed), [{ principalId: 'alice', key: alice.decryption }]);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('tag_wrong_length');
+      assert.strictEqual(result.reason, 'tag_wrong_length');
+    }
+  });
+
+  test('rejects octets shifted across the ciphertext and tag boundary', async () => {
+    // Each case preserves `ciphertext || tag`, so an implementation that
+    // concatenated the members before authenticating would accept them all.
+    const alice = signer('alice');
+    const serialized = await encryptTo([alice]);
+    const parsed = JSON.parse(serialized);
+    const ciphertext = Buffer.from(parsed.ciphertext, 'base64url');
+    const tag = Buffer.from(parsed.tag, 'base64url');
+    const joined = Buffer.concat([ciphertext, tag]);
+
+    const shifted = [
+      // One octet moved from the ciphertext into the tag, and the reverse.
+      { ciphertext: joined.subarray(0, ciphertext.length - 1), tag: joined.subarray(ciphertext.length - 1) },
+      { ciphertext: joined.subarray(0, ciphertext.length + 1), tag: joined.subarray(ciphertext.length + 1) },
+      // Every octet on one side of the boundary.
+      { ciphertext: joined, tag: Buffer.alloc(0) },
+      { ciphertext: Buffer.alloc(0), tag: joined },
+    ];
+
+    for (const members of shifted) {
+      const candidate = JSON.stringify({
+        ...parsed,
+        ciphertext: members.ciphertext.toString('base64url'),
+        tag: members.tag.toString('base64url'),
+      });
+
+      // An emptied member is refused as malformed structure before decryption,
+      // a wrongly sized one during it; either layer rejecting is correct.
+      const parsedJson = parseJson(new TextEncoder().encode(candidate), LIMITS_V1);
+      if (!parsedJson.ok) {
+        throw new Error('bad serialization');
+      }
+      const structure = parseJsonJwe(parsedJson.value, LIMITS_V1);
+      if (!structure.ok) {
+        continue;
+      }
+
+      const result = await decrypt(candidate, [{ principalId: 'alice', key: alice.decryption }]);
+      assert.strictEqual(result.ok, false);
     }
   });
 });
@@ -488,9 +531,9 @@ describe('creation refuses unusable configurations', () => {
       recipients: [{ key: directKey(), keyIdentity: 'content-key' }],
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('nonce_allocator_required');
+      assert.strictEqual(result.reason, 'nonce_allocator_required');
     }
   });
 
@@ -503,9 +546,9 @@ describe('creation refuses unusable configurations', () => {
       nonceAllocator: allocator(),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('key_identity_required');
+      assert.strictEqual(result.reason, 'key_identity_required');
     }
   });
 
@@ -520,7 +563,7 @@ describe('creation refuses unusable configurations', () => {
       recipients: [{ key: alice.encryption }],
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('needs no allocator for a CBC construction', async () => {
@@ -535,7 +578,7 @@ describe('creation refuses unusable configurations', () => {
       recipients: [{ key: alice.encryption }],
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('refuses zero recipients', async () => {
@@ -546,9 +589,9 @@ describe('creation refuses unusable configurations', () => {
       nonceAllocator: allocator(),
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('no_recipients');
+      assert.strictEqual(result.reason, 'no_recipients');
     }
   });
 
@@ -561,9 +604,9 @@ describe('creation refuses unusable configurations', () => {
       flattened: true,
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('flattened_requires_single_recipient');
+      assert.strictEqual(result.reason, 'flattened_requires_single_recipient');
     }
   });
 
@@ -579,9 +622,9 @@ describe('creation refuses unusable configurations', () => {
         protectedHeader: { [name]: 'injected' },
       });
 
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe(`reserved_header_${name}`);
+        assert.strictEqual(result.reason, `reserved_header_${name}`);
       }
     }
   });
@@ -595,9 +638,9 @@ describe('creation refuses unusable configurations', () => {
       protectedHeader: { cty: 'application/json' },
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('header_name_collision');
+      assert.strictEqual(result.reason, 'header_name_collision');
     }
   });
 });

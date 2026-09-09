@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonValue } from '../../../src/internal/json/types.ts';
@@ -23,21 +24,21 @@ describe('form selection', () => {
   test('reads the general form from a signatures array', () => {
     const result = parse(`{"payload":"cGF5","signatures":[{"protected":"${HEADER}","signature":"c2ln"}]}`);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value.form).toBe('general');
-      expect(result.value.signatures).toHaveLength(1);
-      expect(result.value.signatures[0]!.protectedComponent).toBe(HEADER);
+      assert.strictEqual(result.value.form, 'general');
+      assert.strictEqual(result.value.signatures.length, 1);
+      assert.strictEqual(result.value.signatures[0]!.protectedComponent, HEADER);
     }
   });
 
   test('reads the flattened form from top-level members', () => {
     const result = parse(`{"payload":"cGF5","protected":"${HEADER}","signature":"c2ln"}`);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value.form).toBe('flattened');
-      expect(result.value.signatures).toHaveLength(1);
+      assert.strictEqual(result.value.form, 'flattened');
+      assert.strictEqual(result.value.signatures.length, 1);
     }
   });
 
@@ -47,10 +48,10 @@ describe('form selection', () => {
       `{"payload":"cGF5","protected":"${HEADER}","signature":"c2ln","signatures":[{"protected":"${HEADER}","signature":"b3Ro"}]}`,
     );
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('hybrid_serialization');
-      expect(result.category).toBe('invalid_header');
+      assert.strictEqual(result.reason, 'hybrid_serialization');
+      assert.strictEqual(result.category, 'invalid_header');
     }
   });
 
@@ -60,9 +61,9 @@ describe('form selection', () => {
       const result = parse(
         `{"payload":"cGF5","${member}":${value},"signatures":[{"protected":"${HEADER}","signature":"c2ln"}]}`,
       );
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('hybrid_serialization');
+        assert.strictEqual(result.reason, 'hybrid_serialization');
       }
     }
   });
@@ -75,40 +76,40 @@ describe('structural requirements', () => {
     // zero-iteration loop that a vacuous policy could call success.
     const result = parse('{"payload":"cGF5","signatures":[]}');
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('signatures_empty');
-      expect(result.category).toBe('malformed_input');
+      assert.strictEqual(result.reason, 'signatures_empty');
+      assert.strictEqual(result.category, 'malformed_input');
     }
   });
 
   test('requires the signature member', () => {
     const result = parse(`{"payload":"cGF5","signatures":[{"protected":"${HEADER}"}]}`);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('signature_missing');
+      assert.strictEqual(result.reason, 'signature_missing');
     }
   });
 
   test('rejects an empty signature', () => {
     const result = parse(`{"payload":"cGF5","protected":"${HEADER}","signature":""}`);
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('empty_signature');
+      assert.strictEqual(result.reason, 'empty_signature');
     }
   });
 
   test('requires a nonempty protected header', () => {
     const missing = parse('{"payload":"cGF5","signature":"c2ln"}');
-    expect(missing.ok).toBe(false);
+    assert.strictEqual(missing.ok, false);
     if (!missing.ok) {
-      expect(missing.reason).toBe('protected_missing');
+      assert.strictEqual(missing.reason, 'protected_missing');
     }
 
     const empty = parse('{"payload":"cGF5","protected":"","signature":"c2ln"}');
-    expect(empty.ok).toBe(false);
+    assert.strictEqual(empty.ok, false);
     if (!empty.ok) {
-      expect(empty.reason).toBe('protected_empty');
+      assert.strictEqual(empty.reason, 'protected_empty');
     }
   });
 
@@ -116,9 +117,9 @@ describe('structural requirements', () => {
     // An empty optional value must be omitted, not written as `{}`.
     const result = parse(`{"payload":"cGF5","protected":"${HEADER}","header":{},"signature":"c2ln"}`);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('header_empty');
+      assert.strictEqual(result.reason, 'header_empty');
     }
   });
 
@@ -133,27 +134,27 @@ describe('structural requirements', () => {
 
     for (const [text, reason] of cases) {
       const result = parse(text);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe(reason);
+        assert.strictEqual(result.reason, reason);
       }
     }
   });
 
   test('rejects a non-object entry inside signatures', () => {
     const result = parse('{"payload":"cGF5","signatures":["not-an-object"]}');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('signature_entry_not_an_object');
+      assert.strictEqual(result.reason, 'signature_entry_not_an_object');
     }
   });
 
   test('rejects a top-level value that is not an object', () => {
     for (const text of ['[]', '"string"', '42', 'null']) {
       const result = parse(text);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('jws_not_an_object');
+        assert.strictEqual(result.reason, 'jws_not_an_object');
       }
     }
   });
@@ -162,16 +163,16 @@ describe('structural requirements', () => {
 describe('payload presence', () => {
   test('distinguishes an absent payload from an empty one', () => {
     const absent = parse(`{"protected":"${HEADER}","signature":"c2ln"}`);
-    expect(absent.ok).toBe(true);
+    assert.strictEqual(absent.ok, true);
     if (absent.ok) {
       // Absence marks detached form; it is not an empty payload.
-      expect(absent.value.payloadComponent).toBeUndefined();
+      assert.strictEqual(absent.value.payloadComponent, undefined);
     }
 
     const empty = parse(`{"payload":"","protected":"${HEADER}","signature":"c2ln"}`);
-    expect(empty.ok).toBe(true);
+    assert.strictEqual(empty.ok, true);
     if (empty.ok) {
-      expect(empty.value.payloadComponent).toBe('');
+      assert.strictEqual(empty.value.payloadComponent, '');
     }
   });
 });
@@ -180,9 +181,9 @@ describe('ignorable members', () => {
   test('keeps unknown noncritical members from changing the parse', () => {
     const result = parse(`{"payload":"cGF5","protected":"${HEADER}","signature":"c2ln","x-vendor":"anything"}`);
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.value.form).toBe('flattened');
+      assert.strictEqual(result.value.form, 'flattened');
     }
   });
 });
@@ -193,10 +194,10 @@ describe('resource bounds', () => {
     const many = Array.from({ length: LIMITS_V1.signatures + 1 }, () => entry).join(',');
     const result = parse(`{"payload":"cGF5","signatures":[${many}]}`);
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('resource_limit');
-      expect(result.reason).toBe('too_many_signature_entries');
+      assert.strictEqual(result.category, 'resource_limit');
+      assert.strictEqual(result.reason, 'too_many_signature_entries');
     }
   });
 });

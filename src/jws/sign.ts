@@ -132,7 +132,7 @@ type HeaderResult = { readonly ok: true; readonly component: string } | Extract<
  * reused rather than regenerated later from the same members.
  */
 function buildProtectedHeader(algorithm: string, unencoded: boolean, options: SignOptions): HeaderResult {
-  const members: Record<string, string | boolean | string[]> = {};
+  const members: Record<string, string | boolean | string[]> = Object.create(null);
 
   for (const [name, value] of Object.entries(options.protectedHeader ?? {})) {
     // The algorithm and the payload-encoding extension are decided by the key

@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
 
 import { deriveEcPublicPoint, deriveOkpPublicKey } from '../../../src/internal/crypto/node.ts';
@@ -45,13 +46,13 @@ describe('EC key material', () => {
   test('accepts a valid public and private key on each available curve', () => {
     for (const curve of EC_CURVES) {
       const jwk = ecJwk(curve);
-      expect(validateEc(jwk, curve).ok).toBe(true);
+      assert.strictEqual(validateEc(jwk, curve).ok, true);
 
       const { d: _d, ...publicOnly } = jwk;
       const result = validateEc(publicOnly, curve);
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (result.ok) {
-        expect(result.material.d).toBeUndefined();
+        assert.strictEqual(result.material.d, undefined);
       }
     }
   });
@@ -62,9 +63,9 @@ describe('EC key material', () => {
     const a = ecJwk('P-256');
     const b = ecJwk('P-256');
     const result = validateEc({ ...a, x: b['x']!, y: b['y']! }, 'P-256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('public_private_mismatch');
+      assert.strictEqual(result.reason, 'public_private_mismatch');
     }
   });
 
@@ -72,21 +73,21 @@ describe('EC key material', () => {
     const jwk = ecJwk('P-256');
     const offCurve = Buffer.alloc(32, 9).toString('base64url');
     const result = validateEc({ kty: 'EC', crv: 'P-256', x: offCurve, y: offCurve }, 'P-256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('point_not_on_curve');
+      assert.strictEqual(result.reason, 'point_not_on_curve');
     }
     // The genuine key on the same curve still passes.
-    expect(validateEc(jwk, 'P-256').ok).toBe(true);
+    assert.strictEqual(validateEc(jwk, 'P-256').ok, true);
   });
 
   test('requires exact coordinate widths and does not accept stripped padding', () => {
     const jwk = ecJwk('P-256');
     const stripped = Buffer.from(jwk['x']!, 'base64url').subarray(1).toString('base64url');
     const result = validateEc({ ...jwk, x: stripped }, 'P-256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('x_wrong_length');
+      assert.strictEqual(result.reason, 'x_wrong_length');
     }
   });
 
@@ -94,9 +95,9 @@ describe('EC key material', () => {
     const jwk = ecJwk('P-256');
     const zero = Buffer.alloc(32).toString('base64url');
     const result = validateEc({ ...jwk, d: zero }, 'P-256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('private_scalar_invalid');
+      assert.strictEqual(result.reason, 'private_scalar_invalid');
     }
   });
 
@@ -108,33 +109,44 @@ describe('EC key material', () => {
     // P-384 coordinates are the wrong width for P-256, caught before any
     // curve arithmetic runs.
     const result = validateEc(p384, 'P-256');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('x_wrong_length');
+      assert.strictEqual(result.reason, 'x_wrong_length');
     }
   });
 
   test('rejects missing and malformed members', () => {
     const jwk = ecJwk('P-256');
     const { x: _x, ...withoutX } = jwk;
-    expect(validateEc(withoutX, 'P-256').ok).toBe(false);
+    assert.strictEqual(validateEc(withoutX, 'P-256').ok, false);
 
     const padded = validateEc({ ...jwk, y: `${jwk['y']!}=` }, 'P-256');
-    expect(padded.ok).toBe(false);
+    assert.strictEqual(padded.ok, false);
     if (!padded.ok) {
-      expect(padded.category).toBe('invalid_encoding');
+      assert.strictEqual(padded.category, 'invalid_encoding');
     }
   });
 });
 
 describe('OKP key material', () => {
+  test('rejects Ed25519 without an approved public-key validator', () => {
+    const jwk = okpJwk('Ed25519');
+    const result = validateOkpMaterial(object(jwk), 'Ed25519', deriveOkpPublicKey);
+
+    assert.deepStrictEqual(result, {
+      ok: false,
+      category: 'unsupported_algorithm',
+      reason: 'ed25519_validator_unavailable',
+    });
+  });
+
   test('accepts valid public and private keys on each available curve', () => {
     for (const curve of OKP_CURVES) {
       const jwk = okpJwk(curve);
-      expect(validateOkp(jwk, curve).ok).toBe(true);
+      assert.strictEqual(validateOkp(jwk, curve).ok, true);
 
       const { d: _d, ...publicOnly } = jwk;
-      expect(validateOkp(publicOnly, curve).ok).toBe(true);
+      assert.strictEqual(validateOkp(publicOnly, curve).ok, true);
     }
   });
 
@@ -143,9 +155,9 @@ describe('OKP key material', () => {
       const a = okpJwk(curve);
       const b = okpJwk(curve);
       const result = validateOkp({ ...a, x: b['x']! }, curve);
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.reason).toBe('public_private_mismatch');
+        assert.strictEqual(result.reason, 'public_private_mismatch');
       }
     }
   });
@@ -157,23 +169,23 @@ describe('OKP key material', () => {
       return;
     }
     const jwk = okpJwk('X25519');
-    expect(validateOkp(jwk, 'X25519').ok).toBe(true);
+    assert.strictEqual(validateOkp(jwk, 'X25519').ok, true);
   });
 
   test('requires exact key lengths', () => {
     const jwk = okpJwk('X25519');
     const short = Buffer.from(jwk['x']!, 'base64url').subarray(1).toString('base64url');
     const result = validateOkp({ ...jwk, x: short }, 'X25519');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('x_wrong_length');
+      assert.strictEqual(result.reason, 'x_wrong_length');
     }
 
     const shortD = Buffer.from(jwk['d']!, 'base64url').subarray(1).toString('base64url');
     const dResult = validateOkp({ ...jwk, d: shortD }, 'X25519');
-    expect(dResult.ok).toBe(false);
+    assert.strictEqual(dResult.ok, false);
     if (!dResult.ok) {
-      expect(dResult.reason).toBe('d_wrong_length');
+      assert.strictEqual(dResult.reason, 'd_wrong_length');
     }
   });
 
@@ -189,9 +201,9 @@ describe('OKP key material', () => {
     alias[31] = alias[31]! | 0x80;
 
     const result = validateOkp({ ...jwk, x: alias.toString('base64url') }, 'X25519');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('public_private_mismatch');
+      assert.strictEqual(result.reason, 'public_private_mismatch');
     }
   });
 });

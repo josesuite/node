@@ -149,7 +149,7 @@ type HeaderResult =
   | { readonly ok: false; readonly failure: JsonSignResult };
 
 function buildProtectedHeader(algorithm: string, signer: JsonSignerInput, limits: Limits): HeaderResult {
-  const members: Record<string, string | boolean | string[]> = {};
+  const members: Record<string, string | boolean | string[]> = Object.create(null);
 
   for (const [name, value] of Object.entries(signer.protectedHeader ?? {})) {
     // The algorithm is fixed by the key binding, and this entry point does not
@@ -171,7 +171,7 @@ function buildProtectedHeader(algorithm: string, signer: JsonSignerInput, limits
   // collision is refused at creation rather than emitted for a consumer to
   // reject.
   for (const name of Object.keys(signer.unprotectedHeader ?? {})) {
-    if (name in members) {
+    if (Object.hasOwn(members, name)) {
       return { ok: false, failure: fail('invalid_header', 'header_name_collision') };
     }
   }

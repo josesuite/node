@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 import { createCipheriv, generateKeyPairSync, randomBytes } from 'node:crypto';
 
 import { systemRandom } from '../../../src/internal/crypto/random.ts';
@@ -88,18 +89,18 @@ describe('round trips', () => {
     test(`A256KW with ${enc}`, async () => {
       const pair = symmetric('A256KW', 32);
       const encrypted = await encrypt(pair.encryption, 'A256KW', enc);
-      expect(encrypted.ok).toBe(true);
+      assert.strictEqual(encrypted.ok, true);
       if (!encrypted.ok) {
         return;
       }
 
-      expect(encrypted.token.split('.')).toHaveLength(5);
+      assert.strictEqual(encrypted.token.split('.').length, 5);
 
       const result = await decrypt(encrypted.token, pair.decryption, 'A256KW', enc);
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (result.ok) {
-        expect(result.plaintext).toEqual(PLAINTEXT);
-        expect(result.principalId).toBe('alice');
+        assert.deepStrictEqual(result.plaintext, PLAINTEXT);
+        assert.strictEqual(result.principalId, 'alice');
       }
     });
   }
@@ -109,17 +110,17 @@ describe('round trips', () => {
     // no way to omit a component, so it is empty.
     const pair = symmetric('dir', 16, ['A128GCM']);
     const encrypted = await encrypt(pair.encryption, 'dir', 'A128GCM');
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
-    expect(encrypted.token.split('.')[1]).toBe('');
+    assert.strictEqual(encrypted.token.split('.')[1], '');
 
     const result = await decrypt(encrypted.token, pair.decryption, 'dir', 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(PLAINTEXT);
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
     }
   });
 
@@ -137,15 +138,15 @@ describe('round trips', () => {
     );
 
     const encrypted = await encrypt(encryption, 'RSA-OAEP-256', 'A128GCM');
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     const result = await decrypt(encrypted.token, decryption, 'RSA-OAEP-256', 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(PLAINTEXT);
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
     }
   });
 
@@ -165,17 +166,17 @@ describe('round trips', () => {
     );
 
     const encrypted = await encrypt(encryption, 'ECDH-ES', 'A128GCM');
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     const header = JSON.parse(Buffer.from(encrypted.token.split('.')[0]!, 'base64url').toString('utf8'));
-    expect(header.epk).toBeDefined();
-    expect(header.epk.d).toBeUndefined();
+    assert.notStrictEqual(header.epk, undefined);
+    assert.strictEqual(header.epk.d, undefined);
 
     const result = await decrypt(encrypted.token, decryption, 'ECDH-ES', 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('round-trips an empty plaintext', async () => {
@@ -189,19 +190,19 @@ describe('round trips', () => {
       random: systemRandom,
       nonceAllocator: allocator(),
     });
-    expect(encrypted.ok).toBe(true);
+    assert.strictEqual(encrypted.ok, true);
     if (!encrypted.ok) {
       return;
     }
 
     // GCM produces no ciphertext octets, so that component is empty while the
     // remaining four are present.
-    expect(encrypted.token.split('.')[3]).toBe('');
+    assert.strictEqual(encrypted.token.split('.')[3], '');
 
     const result = await decrypt(encrypted.token, pair.decryption, 'A256KW', 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(new Uint8Array(0));
+      assert.deepStrictEqual(result.plaintext, new Uint8Array(0));
     }
   });
 });
@@ -244,14 +245,25 @@ describe('interoperability with an independently built object', () => {
     const decryption = key({ kty: 'oct', k: kekBytes.toString('base64url') }, 'A256KW', 'unwrapKey');
 
     const result = await decrypt(token, decryption, 'A256KW', 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (result.ok) {
-      expect(result.plaintext).toEqual(PLAINTEXT);
+      assert.deepStrictEqual(result.plaintext, PLAINTEXT);
     }
   });
 });
 
 describe('Compact cannot express what it has no room for', () => {
+  test('forwards JSON encryption failures', async () => {
+    const pair = symmetric('A256KW', 32, ['A128GCM']);
+    const result = await encrypt(pair.encryption, 'A256KW', 'A192GCM');
+
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'incompatible_key');
+      assert.strictEqual(result.reason, 'content_algorithm_not_bound');
+    }
+  });
+
   test('refuses an unprotected header', async () => {
     // Dropping it would emit an object missing data the caller supplied.
     const pair = symmetric('A256KW', 32);
@@ -259,9 +271,9 @@ describe('Compact cannot express what it has no room for', () => {
       recipients: [{ key: pair.encryption, unprotectedHeader: { kid: 'hint' } }],
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('compact_has_no_unprotected_header');
+      assert.strictEqual(result.reason, 'compact_has_no_unprotected_header');
     }
   });
 
@@ -272,9 +284,9 @@ describe('Compact cannot express what it has no room for', () => {
       recipients: [{ key: a.encryption }, { key: b.encryption }],
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.reason).toBe('compact_requires_single_recipient');
+      assert.strictEqual(result.reason, 'compact_requires_single_recipient');
     }
   });
 });
@@ -290,10 +302,10 @@ describe('structural rejection', () => {
     const parts = encrypted.token.split('.');
     for (const token of [parts.slice(0, 4).join('.'), `${encrypted.token}.extra`]) {
       const result = await decrypt(token, pair.decryption, 'A256KW', 'A128GCM');
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
       if (!result.ok) {
-        expect(result.stage).toBe('syntax');
-        expect(result.reason).toBe('compact_component_count');
+        assert.strictEqual(result.stage, 'syntax');
+        assert.strictEqual(result.reason, 'compact_component_count');
       }
     }
   });
@@ -314,7 +326,7 @@ describe('structural rejection', () => {
       parts[index] = bytes.toString('base64url');
 
       const result = await decrypt(parts.join('.'), pair.decryption, 'A256KW', 'A128GCM');
-      expect(result.ok).toBe(false);
+      assert.strictEqual(result.ok, false);
     }
   });
 
@@ -331,11 +343,11 @@ describe('structural rejection', () => {
     parts[1] = bytes.toString('base64url');
 
     const result = await decrypt(parts.join('.'), pair.decryption, 'A256KW', 'A128GCM');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
       // A failed unwrap and a failed content tag report identically.
-      expect(result.category).toBe('authentication_failure');
-      expect(result.reason).toBe('decryption_failed');
+      assert.strictEqual(result.category, 'authentication_failure');
+      assert.strictEqual(result.reason, 'decryption_failed');
     }
   });
 
@@ -355,11 +367,11 @@ describe('structural rejection', () => {
     parts[4] = tag.toString('base64url');
     const badTag = await decrypt(parts.join('.'), pair.decryption, 'A256KW', 'A128GCM');
 
-    expect(wrongKey.ok).toBe(false);
-    expect(badTag.ok).toBe(false);
+    assert.strictEqual(wrongKey.ok, false);
+    assert.strictEqual(badTag.ok, false);
     if (!wrongKey.ok && !badTag.ok) {
-      expect(wrongKey.category).toBe(badTag.category);
-      expect(wrongKey.reason).toBe(badTag.reason);
+      assert.strictEqual(wrongKey.category, badTag.category);
+      assert.strictEqual(wrongKey.reason, badTag.reason);
     }
   });
 });
@@ -380,7 +392,7 @@ describe('kid filtering', () => {
     }
 
     const result = await decrypt(encrypted.token, alice.decryption, 'A256KW', 'A128GCM');
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
   });
 
   test('an unmatched kid resolves nothing rather than using the sole trusted key', async () => {
@@ -395,10 +407,10 @@ describe('kid filtering', () => {
     }
 
     const result = await decrypt(encrypted.token, alice.decryption, 'A256KW', 'A128GCM');
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (!result.ok) {
-      expect(result.category).toBe('key_resolution_failure');
-      expect(result.reason).toBe('no_eligible_recipient');
+      assert.strictEqual(result.category, 'key_resolution_failure');
+      assert.strictEqual(result.reason, 'no_eligible_recipient');
     }
   });
 });

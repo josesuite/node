@@ -2,6 +2,8 @@
  * Shared RSA key handling for the JWS signature adapters.
  */
 
+import { encodeBase64url as b64u } from '../../internal/encoding/base64url.ts';
+
 export interface RsaJwkParameters {
   readonly n: Uint8Array;
   readonly e: Uint8Array;
@@ -12,10 +14,6 @@ export interface RsaJwkParameters {
   readonly dp?: Uint8Array | undefined;
   readonly dq?: Uint8Array | undefined;
   readonly qi?: Uint8Array | undefined;
-}
-
-function b64u(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64url');
 }
 
 /**
