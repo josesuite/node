@@ -21,6 +21,7 @@
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
+import { encodeUtf8 } from '../../internal/encoding/utf8.ts';
 import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
 
 export interface Pbes2Parameters {
@@ -93,7 +94,7 @@ export function checkWorkFactor(algorithm: string, saltInput: Uint8Array, iterat
  * the salt's leading bytes would collide with a shorter name and longer salt.
  */
 export function buildSalt(algorithm: string, saltInput: Uint8Array): Uint8Array {
-  const name = new TextEncoder().encode(algorithm);
+  const name = encodeUtf8(algorithm);
   const salt = new Uint8Array(name.length + 1 + saltInput.length);
   salt.set(name, 0);
   salt[name.length] = 0x00;
