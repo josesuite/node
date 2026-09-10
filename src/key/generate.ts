@@ -15,6 +15,7 @@
  * applied here rather than assumed.
  */
 
+import { isQualifiedAlgorithm, lookupAlgorithm } from '../algorithms/registry.ts';
 import type { ErrorCategory } from '../errors/codes.ts';
 import type { UsableKey } from './import.ts';
 import type { EcCurve, KeyOperation } from './types.ts';
@@ -92,3 +93,33 @@ const KEY_PAIR_OPERATIONS: Readonly<Record<string, readonly [KeyOperation, KeyOp
   direct_agreement: ['deriveKey', 'deriveKey'],
   agreement_with_wrapping: ['deriveKey', 'deriveKey'],
 });
+
+type EligibilityFailure = { readonly ok: false; readonly category: ErrorCategory; readonly reason: string };
+
+/**
+ * Confirms an identifier may be generated for at all.
+ *
+ * Generation is a creation operation, so a receive-only legacy identifier is
+ * refused here rather than producing a key that could only ever verify or
+ * decrypt. Import applies the same rule, but reporting it before generating
+ * keeps an expensive RSA generation from running for a request that cannot
+ * succeed.
+ */
+function checkCreationEligibility(algorithm: string): EligibilityFailure | undefined {
+  if (!isQualifiedAlgorithm(algorithm)) {
+    return reject('algorithm_not_qualified', 'unsupported_algorithm');
+  }
+
+  const descriptor = lookupAlgorithm(algorithm, 'jws') ?? lookupAlgorithm(algorithm, 'jwe_alg');
+  if (descriptor === undefined || descriptor.category === 'unspecified') {
+    return reject('algorithm_unsupported_for_generation', 'unsupported_algorithm');
+  }
+  if (descriptor.category === 'prohibited') {
+    return reject('prohibited_algorithm', 'prohibited_algorithm');
+  }
+  if (!descriptor.canCreate) {
+    return reject('algorithm_receive_only');
+  }
+
+  return undefined;
+}
