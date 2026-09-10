@@ -14,6 +14,7 @@
 import { verifyWithKey } from '../algorithms/index.ts';
 import type { ErrorCategory, TrustStage } from '../errors/codes.ts';
 import { decodeBase64url, encodeBase64url } from '../internal/encoding/base64url.ts';
+import { encodeUtf8 } from '../internal/encoding/utf8.ts';
 import { resolveB64, validateCritical, validateParameterTypes } from '../internal/headers/critical.ts';
 import { type HeaderSource, mergeHeaders, requireHeaderObject } from '../internal/headers/merge.ts';
 import type { MergedHeader } from '../internal/headers/types.ts';
@@ -322,7 +323,7 @@ function decodeAcceptedPayload(
   }
 
   if (!encoded) {
-    const octets = new TextEncoder().encode(component);
+    const octets = encodeUtf8(component);
     if (octets.length > limits.payload) {
       return { ok: false, category: 'resource_limit', reason: 'payload_too_large' };
     }
@@ -646,7 +647,7 @@ function buildEntrySigningInput(
     // must satisfy the accepted profile before any signature is computed over
     // them.
     if (!encoded) {
-      const octets = new TextEncoder().encode(payloadComponent);
+      const octets = encodeUtf8(payloadComponent);
       const permitted = validateInlineUnencodedPayload(octets, true);
       if (!permitted.ok) {
         return permitted;
