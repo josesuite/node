@@ -19,10 +19,13 @@
  */
 
 import type { ErrorCategory } from './errors/codes.ts';
+import { decodeBase64url } from './internal/encoding/base64url.ts';
+import { requireHeaderObject } from './internal/headers/merge.ts';
+import { parseJson } from './internal/json/parse.ts';
 import type { JsonObject, JsonValue } from './internal/json/types.ts';
 import { parseCompact } from './jws/compact.ts';
 import { parseCompactJwe } from './jwe/parse.ts';
-import type { Limits } from './policy/limits.ts';
+import { checkLimits, type Limits, LIMITS_V1 } from './policy/limits.ts';
 
 /**
  * Which serialization the input is required to be.
@@ -70,6 +73,54 @@ type InspectFailure = { readonly ok: false; readonly category: ErrorCategory; re
 
 function reject(reason: string, category: ErrorCategory = 'malformed_input'): InspectFailure {
   return { ok: false, category, reason };
+}
+
+/**
+ * Reads the protected header of a compact JWS or JWE without verifying it.
+ *
+ * Structural rejection matches the verifying parsers, so a token this refuses
+ * would never have verified either. The converse does not hold: success here
+ * says only that the header decoded, and a token that inspects cleanly can
+ * still fail every subsequent check.
+ *
+ * No network, filesystem, key-resolution, or cryptographic work is performed.
+ */
+export function inspectUnverifiedHeader(token: string, options: InspectOptions): InspectResult {
+  const limits = options.limits ?? LIMITS_V1;
+  const limitDefect = checkLimits(limits);
+  if (limitDefect !== undefined) {
+    return reject(limitDefect, 'policy_violation');
+  }
+
+  const component = readProtectedComponent(token, options.serialization, limits);
+  if (!component.ok) {
+    return component;
+  }
+
+  const bytes = decodeBase64url(component.value, limits.headerSource);
+  if (!bytes.ok) {
+    return bytes.failure === 'too_large'
+      ? reject('protected_header_too_large', 'resource_limit')
+      : reject('protected_header_invalid_base64url', 'invalid_encoding');
+  }
+
+  const json = parseJson(bytes.bytes, limits);
+  if (!json.ok) {
+    const category: ErrorCategory =
+      json.failure === 'resource_limit'
+        ? 'resource_limit'
+        : json.failure === 'invalid_encoding'
+          ? 'invalid_encoding'
+          : 'malformed_input';
+    return reject(`protected_header_${json.failure}`, category);
+  }
+
+  const object = requireHeaderObject(json.value);
+  if (!object.ok) {
+    return reject(object.reason, object.category);
+  }
+
+  return { ok: true, header: project(object.object, options.serialization) };
 }
 
 type ComponentResult = { readonly ok: true; readonly value: string } | InspectFailure;
