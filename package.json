@@ -33,7 +33,7 @@
     "format:fix": "oxfmt",
     "build": "tsc",
     "test": "node --test",
-    "test:coverage": "node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=lcov.info"
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-reporter=lcov --test-reporter-destination=lcov.info"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",
