@@ -625,3 +625,50 @@ describe('RSA material validation', () => {
   });
 });
 
+describe('EC material validation', () => {
+  test('rejects coordinates of the wrong width for the curve', async () => {
+    const jwk = ecJwk();
+    const short = Buffer.alloc(8, 1).toString('base64url');
+
+    for (const member of ['x', 'y', 'd'] as const) {
+      const result = importKey(object({ ...jwk, [member]: short }), { algorithm: 'ES256', operation: 'sign' });
+      assert.strictEqual(result.ok, false);
+    }
+  });
+
+  test('rejects a point that is not on the named curve', async () => {
+    // Coordinates outside the field, points off the curve, and the point at
+    // infinity would all make the key unusable as an identity.
+    const jwk = ecJwk();
+    const x = Buffer.from(jwk['x']!, 'base64url');
+    const flipped = Buffer.from(x.map((byte, index) => (index === 0 ? byte ^ 0xff : byte)));
+
+    assertRejected(
+      importKey(object({ ...jwk, x: flipped.toString('base64url'), d: undefined }), EC_VERIFY),
+      'point_not_on_curve',
+    );
+  });
+
+  test('rejects a private scalar that does not derive the published point', async () => {
+    const jwk = ecJwk();
+    const other = ecJwk();
+
+    // The published point and the scalar describe different keys, so the pair
+    // is refused rather than either half being trusted.
+    assertRejected(
+      importKey(object({ ...jwk, d: other['d'] }), { algorithm: 'ES256', operation: 'sign' }),
+      'public_private_mismatch',
+    );
+  });
+
+  test('rejects a private scalar outside the valid range', async () => {
+    const jwk = ecJwk();
+    const zero = Buffer.alloc(32).toString('base64url');
+
+    assertRejected(
+      importKey(object({ ...jwk, d: zero }), { algorithm: 'ES256', operation: 'sign' }),
+      'private_scalar_invalid',
+    );
+  });
+});
+
