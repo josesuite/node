@@ -4,9 +4,11 @@ import { describe, test } from 'node:test';
 import { AlgorithmPolicy } from '../../src/policy/algorithms.ts';
 import { encodeBase64url } from '../../src/internal/encoding/base64url.ts';
 import { systemRandom } from '../../src/internal/crypto/random.ts';
-import { generateSecret } from '../../src/key/generate.ts';
+import { generateKeyPair, generateSecret } from '../../src/key/generate.ts';
 import { inspectUnverifiedHeader } from '../../src/inspect.ts';
 import { encryptCompact } from '../../src/jwe/compact.ts';
+import { signCompact } from '../../src/jws/sign.ts';
+import { verifyCompact } from '../../src/jws/verify.ts';
 import { LIMITS_V1 } from '../../src/policy/limits.ts';
 
 const encoder = new TextEncoder();
@@ -62,5 +64,32 @@ describe('unverified header inspection', () => {
     });
     assert.ok(jws.ok);
     assert.strictEqual(jws.header.unverifiedContentAlgorithm, undefined);
+  });
+
+  test('inspects a structurally valid token whose signature does not verify', async () => {
+    const keys = await generateKeyPair({ algorithm: 'ES256' });
+    assert.ok(keys.ok);
+
+    const signed = await signCompact(encoder.encode('hello'), {
+      key: keys.keys.privateKey,
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      limits: LIMITS_V1,
+    });
+    assert.ok(signed.ok);
+
+    const tampered = `${signed.token.slice(0, -4)}AAAA`;
+    const inspected = inspectUnverifiedHeader(tampered, { serialization: 'jws-compact' });
+    assert.ok(inspected.ok);
+    assert.strictEqual(inspected.header.unverifiedAlgorithm, 'ES256');
+
+    // Inspection succeeding says nothing about the signature: the same token
+    // must still fail verification.
+    const verified = await verifyCompact(tampered, {
+      key: keys.keys.publicKey,
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+      limits: LIMITS_V1,
+      principalId: 'signer',
+    });
+    assert.strictEqual(verified.ok, false);
   });
 });
