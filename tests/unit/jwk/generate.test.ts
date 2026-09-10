@@ -5,6 +5,7 @@ import { encodeBase64url } from '../../../src/internal/encoding/base64url.ts';
 import { systemRandom } from '../../../src/internal/crypto/random.ts';
 import { importKeyBytes } from '../../../src/key/import.ts';
 import { decryptCompact, encryptCompact } from '../../../src/jwe/compact.ts';
+import { exportEcPublicJwk, exportRsaPublicJwk } from '../../../src/jwk/export.ts';
 import { generateKeyPair, generateSecret } from '../../../src/key/generate.ts';
 import { signCompact } from '../../../src/jws/sign.ts';
 import { verifyCompact } from '../../../src/jws/verify.ts';
@@ -390,5 +391,60 @@ describe('key generation: rejected configurations', () => {
     const secret = generateSecret({ algorithm: 'HS256', limits: inflated });
     assert.strictEqual(secret.ok, false);
     assert.strictEqual(secret.category, 'policy_violation');
+  });
+});
+
+describe('key generation: material handling', () => {
+  test('the public half carries no private material', async () => {
+    const ec = await generateKeyPair({ algorithm: 'ES256' });
+    assert.ok(ec.ok);
+    const ecPublic = exportEcPublicJwk(ec.keys.publicKey.material as never);
+    assert.strictEqual('d' in ecPublic, false);
+    assert.strictEqual((ec.keys.publicKey.material as { d?: unknown }).d, undefined);
+
+    const rsa = await generateKeyPair({ algorithm: 'RS256' });
+    assert.ok(rsa.ok);
+    const rsaPublic = exportRsaPublicJwk(rsa.keys.publicKey.material as never);
+    for (const member of ['d', 'p', 'q', 'dp', 'dq', 'qi']) {
+      assert.strictEqual(member in rsaPublic, false, member);
+      assert.strictEqual(
+        (rsa.keys.publicKey.material as unknown as Record<string, unknown>)[member],
+        undefined,
+        member,
+      );
+    }
+  });
+
+  test('both halves share one identity', async () => {
+    const generated = await generateKeyPair({ algorithm: 'ES256' });
+    assert.ok(generated.ok);
+
+    // A private key and its public half are the same cryptographic key, so
+    // their canonical identities must agree.
+    assert.deepStrictEqual(generated.keys.privateKey.identity, generated.keys.publicKey.identity);
+  });
+
+  test('generated keys are sealed against material disclosure', async () => {
+    const generated = await generateKeyPair({ algorithm: 'ES256' });
+    assert.ok(generated.ok);
+
+    const serialized = JSON.stringify(generated.keys.privateKey);
+    assert.strictEqual(serialized.includes('material'), false);
+    assert.ok(Object.isFrozen(generated.keys.privateKey));
+    assert.strictEqual(Object.propertyIsEnumerable.call(generated.keys.privateKey, 'material'), false);
+  });
+
+  test('successive calls produce distinct keys', async () => {
+    const first = await generateKeyPair({ algorithm: 'ES256' });
+    const second = await generateKeyPair({ algorithm: 'ES256' });
+    assert.ok(first.ok);
+    assert.ok(second.ok);
+    assert.notDeepStrictEqual(first.keys.privateKey.identity, second.keys.privateKey.identity);
+
+    const firstSecret = generateSecret({ algorithm: 'HS256' });
+    const secondSecret = generateSecret({ algorithm: 'HS256' });
+    assert.ok(firstSecret.ok);
+    assert.ok(secondSecret.ok);
+    assert.notDeepStrictEqual(firstSecret.key.material, secondSecret.key.material);
   });
 });
