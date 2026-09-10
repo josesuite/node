@@ -579,6 +579,12 @@ function big(jwk: Record<string, string>, member: string): bigint {
   return BigInt(`0x${Buffer.from(jwk[member]!, 'base64url').toString('hex')}`);
 }
 
+function x25519Jwk(): Record<string, string> {
+  return generateKeyPairSync('x25519').privateKey.export({
+    format: 'jwk',
+  }) as unknown as Record<string, string>;
+}
+
 describe('RSA material validation', () => {
   /** Mutates one supplied key so overrides stay consistent with its own members. */
   function importRsa(jwk: Record<string, string>, overrides: Record<string, unknown>) {
@@ -709,3 +715,47 @@ describe('RSA private CRT validation', () => {
   });
 });
 
+describe('OKP material validation', () => {
+  const AGREEMENT = { algorithm: 'ECDH-ES', operation: 'deriveKey', contentAlgorithms: ['A128GCM'] } as const;
+
+  test('refuses the Ed curves as unqualified before any material is read', () => {
+    // The signing curves are gated at import rather than rejected later, so no
+    // key bound to them can reach a cryptographic operation.
+    for (const crv of ['Ed25519', 'Ed448']) {
+      const result = importKey(object({ kty: 'OKP', crv, x: Buffer.alloc(32).toString('base64url') }), {
+        algorithm: 'EdDSA',
+        operation: 'verify',
+      });
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.reason, 'curve_not_qualified');
+        assert.strictEqual(result.category, 'unsupported_algorithm');
+      }
+    }
+  });
+
+  test('rejects components of the wrong width for the curve', () => {
+    const jwk = x25519Jwk();
+    const short = Buffer.alloc(8, 1).toString('base64url');
+
+    assertRejected(importKey(object({ ...jwk, x: short }), AGREEMENT), 'x_wrong_length');
+    assertRejected(importKey(object({ ...jwk, d: short }), AGREEMENT), 'd_wrong_length');
+  });
+
+  test('rejects a private key that does not derive the published public key', () => {
+    const jwk = x25519Jwk();
+    const other = x25519Jwk();
+
+    assertRejected(importKey(object({ ...jwk, d: other['d'] }), AGREEMENT), 'public_private_mismatch');
+  });
+
+  test('imports a public-only agreement key', () => {
+    const { d: _d, ...publicOnly } = x25519Jwk();
+
+    const result = importKey(object(publicOnly), AGREEMENT);
+    assert.strictEqual(result.ok, true);
+    if (result.ok) {
+      assert.strictEqual(result.key.isPrivate, false);
+    }
+  });
+});
