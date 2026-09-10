@@ -103,6 +103,60 @@ const KEY_PAIR_OPERATIONS: Readonly<Record<string, readonly [KeyOperation, KeyOp
 });
 
 /**
+ * Generates an asymmetric key pair bound to one algorithm.
+ *
+ * Both halves are admitted through import separately, so a defect in generated
+ * material is reported before any usable key exists rather than at first use.
+ */
+export async function generateKeyPair(options: GenerateKeyOptions): Promise<GenerateKeyPairResult> {
+  const limits = options.limits ?? LIMITS_V1;
+  const eligibility = checkCreationEligibility(options.algorithm);
+  if (eligibility !== undefined) {
+    return eligibility;
+  }
+
+  // HMAC and the symmetric key-management families have no public half, so a
+  // request for a pair is a configuration error rather than a generation
+  // failure, and is reported as such before any provider work runs.
+  const shape = keyManagementShape(options.algorithm);
+  const operations =
+    hmacOutputBytes(options.algorithm) !== undefined
+      ? undefined
+      : KEY_PAIR_OPERATIONS[shape === undefined ? 'jws' : shape.mode];
+  if (operations === undefined) {
+    return reject('algorithm_requires_a_secret_not_a_key_pair', 'incompatible_key');
+  }
+
+  const material = await generateMaterial(options);
+  if (!material.ok) {
+    return material;
+  }
+
+  const contentAlgorithms = options.contentAlgorithms;
+  const privateKey = admit(material.privateJwk, {
+    algorithm: options.algorithm,
+    operation: operations[0],
+    contentAlgorithms,
+    limits,
+  });
+  if (!privateKey.ok) {
+    return privateKey;
+  }
+
+  const publicKey = admit(material.publicJwk, {
+    algorithm: options.algorithm,
+    operation: operations[1],
+    contentAlgorithms,
+    limits,
+  });
+  if (!publicKey.ok) {
+    return publicKey;
+  }
+
+  return { ok: true, keys: { privateKey: privateKey.key, publicKey: publicKey.key } };
+}
+
+/**
  * Generates a symmetric secret bound to one algorithm.
  *
  * The size comes from the algorithm: the hash output length for HMAC, the AES
