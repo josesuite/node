@@ -20,6 +20,8 @@
 
 import type { ErrorCategory } from './errors/codes.ts';
 import type { JsonObject, JsonValue } from './internal/json/types.ts';
+import { parseCompact } from './jws/compact.ts';
+import { parseCompactJwe } from './jwe/parse.ts';
 import type { Limits } from './policy/limits.ts';
 
 /**
@@ -68,6 +70,25 @@ type InspectFailure = { readonly ok: false; readonly category: ErrorCategory; re
 
 function reject(reason: string, category: ErrorCategory = 'malformed_input'): InspectFailure {
   return { ok: false, category, reason };
+}
+
+type ComponentResult = { readonly ok: true; readonly value: string } | InspectFailure;
+
+/**
+ * Splits the token with the same parser the verifying path uses.
+ *
+ * Sharing it is what keeps inspection from accepting a shape verification would
+ * refuse; a second, more lenient splitter here would report a header for a
+ * token that no verifier could ever process.
+ */
+function readProtectedComponent(token: string, serialization: InspectSerialization, limits: Limits): ComponentResult {
+  if (serialization === 'jws-compact') {
+    const parsed = parseCompact(token, limits.joseInput);
+    return parsed.ok ? { ok: true, value: parsed.parts.protectedComponent } : reject(parsed.reason, parsed.category);
+  }
+
+  const parsed = parseCompactJwe(token, limits);
+  return parsed.ok ? { ok: true, value: parsed.value.protectedComponent } : reject(parsed.reason, parsed.category);
 }
 
 /**
