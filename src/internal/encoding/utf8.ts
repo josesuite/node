@@ -10,7 +10,12 @@
  * bytes are what later gets authenticated.
  */
 
-const FATAL_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+/**
+ * Shared because a non-streaming `decode` call carries no state between
+ * invocations, so one instance serves every caller and avoids allocating a
+ * decoder per document parsed.
+ */
+export const FATAL_DECODER = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const ENCODER = new TextEncoder();
 
 export type Utf8Failure =
