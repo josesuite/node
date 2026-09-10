@@ -6,8 +6,8 @@ import { generateKeyPairSync } from 'node:crypto';
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonObject } from '../../../src/internal/json/types.ts';
 import { createJwt, createJwtWithRandom } from '../../../src/jwt/create.ts';
-import { createJwtProfile } from '../../../src/jwt/profile.ts';
-import type { ReplayStore } from '../../../src/jwt/types.ts';
+import { createJwtProfile, isJwtProfile } from '../../../src/jwt/profile.ts';
+import type { JwtProfileInput, ReplayStore } from '../../../src/jwt/types.ts';
 import { validateJwt } from '../../../src/jwt/validate.ts';
 import { encryptCompact } from '../../../src/jwe/compact.ts';
 import { composeNonce, type NonceAllocator, type NonceResult } from '../../../src/jwe/nonce.ts';
@@ -858,3 +858,183 @@ describe('audience matching across both permitted encodings', () => {
     }
   });
 });
+
+describe('JWT profile configuration', () => {
+  function baseInput(): JwtProfileInput {
+    const pair = keys();
+    return {
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWS -> claims',
+      clock: { now: () => 1_000n },
+      subject: () => true,
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: pair.verification,
+        principalId: 'https://issuer.example',
+      },
+    };
+  }
+
+  function rejects(reason: string, overrides: Partial<Record<keyof JwtProfileInput, unknown>>): void {
+    const result = createJwtProfile({ ...baseInput(), ...overrides } as JwtProfileInput);
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, reason);
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.stage, 'configuration');
+    }
+  }
+
+  test('rejects unregistered profile names', () => {
+    for (const name of ['', 'project-jwt-v2', 'PROJECT-JWT-V1', 'oauth-at-jwt']) {
+      rejects('unsupported_jwt_profile', { name });
+    }
+  });
+
+  test('requires a non-empty issuer and audience within the identifier limit', () => {
+    rejects('expected_issuer_required', { issuer: '' });
+    rejects('expected_audience_required', { audience: '' });
+
+    const long = 'a'.repeat(LIMITS_V1.identifier + 1);
+    rejects('expected_identifier_too_long', { issuer: long });
+    rejects('expected_identifier_too_long', { audience: long });
+  });
+
+  test('requires an explicit media type that is not the generic application/jwt', () => {
+    for (const type of ['', 'not a media type', 'application/']) {
+      rejects('expected_type_invalid', { type });
+    }
+    // The generic type carries no distinguishing information, so it is refused
+    // in both the bare and fully qualified spellings.
+    rejects('expected_type_invalid', { type: 'JWT' });
+    rejects('expected_type_invalid', { type: 'application/jwt' });
+  });
+
+  test('rejects an unknown chain and mismatched decryption policy', () => {
+    rejects('invalid_jwt_chain', { chain: 'JWE -> claims' });
+    rejects('decryption_policy_required', { chain: 'JWE -> JWS -> claims' });
+
+    const encryption = encryptionKeys();
+    rejects('unexpected_decryption_policy', {
+      chain: 'JWS -> claims',
+      decryption: {
+        keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'receive'),
+        contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'receive'),
+        recipients: [{ principalId: 'recipient', key: encryption.decryption }],
+        principalId: 'recipient',
+      },
+    });
+  });
+
+  test('binds the verification principal to the issuer', () => {
+    const input = baseInput();
+    rejects('verification_principal_must_match_issuer', {
+      verification: { ...input.verification, principalId: 'https://other.example' },
+    });
+  });
+
+  test('refuses the unencoded payload mode for every JWT profile', () => {
+    const input = baseInput();
+    rejects('unencoded_payload_not_available_for_jwt', {
+      verification: { ...input.verification, unencodedPayload: true },
+    });
+  });
+
+  test('requires a subject validator function', () => {
+    for (const subject of [undefined, null, true, 'alice', {}]) {
+      rejects('subject_validator_required', { subject });
+    }
+  });
+
+  test('caps clock skew at five minutes and rejects non-integral values', () => {
+    for (const skew of [-1, 301, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 2]) {
+      rejects('invalid_clock_skew', { skew });
+    }
+
+    for (const skew of [undefined, 0, 300]) {
+      const result = createJwtProfile({ ...baseInput(), skew } as JwtProfileInput);
+      assert.strictEqual(result.ok, true);
+      if (result.ok) {
+        assert.strictEqual(result.profile.skew, BigInt(skew ?? 0));
+      }
+    }
+  });
+
+  test('requires a replay store for the single-use profile', () => {
+    rejects('replay_store_required', { name: 'project-single-use-jwt-v1' });
+  });
+
+  test('requires RS256 support and a bounded lifetime for the OAuth profile', () => {
+    const rsa = rsaKeys();
+    const oauth = {
+      name: 'oauth-at-jwt-v1',
+      type: 'at+jwt',
+      maximumLifetime: 600,
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['RS256'], 'receive'),
+        key: rsa.verification,
+        principalId: 'https://issuer.example',
+      },
+    };
+
+    rejects('oauth_access_token_type_required', { ...oauth, type: 'project+jwt' });
+
+    // The profile is defined over RS256, so neither a policy that omits it nor a
+    // key bound to a different algorithm can satisfy it.
+    const es = keys();
+    rejects('oauth_rs256_support_required', {
+      ...oauth,
+      verification: { ...oauth.verification, policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive') },
+    });
+    rejects('oauth_rs256_support_required', {
+      ...oauth,
+      verification: { ...oauth.verification, key: es.verification },
+    });
+
+    rejects('oauth_maximum_lifetime_required', { ...oauth, maximumLifetime: undefined });
+  });
+
+  test('rejects a non-positive maximum lifetime and fixes it outside the OAuth profile', () => {
+    const rsa = rsaKeys();
+    const oauth = {
+      name: 'oauth-at-jwt-v1',
+      type: 'at+jwt',
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['RS256'], 'receive'),
+        key: rsa.verification,
+        principalId: 'https://issuer.example',
+      },
+    };
+
+    for (const maximumLifetime of [0, -1, 1.5]) {
+      rejects('invalid_maximum_lifetime', { ...oauth, maximumLifetime });
+    }
+
+    rejects('fixed_maximum_lifetime', { maximumLifetime: 600 });
+  });
+
+  test('brands only profiles built here, and namespaces replay by profile identity', () => {
+    const result = createJwtProfile(baseInput());
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+
+    assert.strictEqual(isJwtProfile(result.profile), true);
+    assert.strictEqual(result.profile.maximumLifetime, 3_600n);
+    assert.deepStrictEqual(JSON.parse(result.profile.replayNamespace), [
+      'project-jwt-v1',
+      1,
+      'https://issuer.example',
+      'api',
+    ]);
+
+    // A copy carries the same fields but not the brand, so validation cannot be
+    // bypassed with a profile-shaped literal.
+    assert.strictEqual(isJwtProfile({ ...result.profile }), false);
+  });
+});
+
