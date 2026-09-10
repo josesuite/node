@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
+import { encodeBase64url } from '../../../src/internal/encoding/base64url.ts';
 import { systemRandom } from '../../../src/internal/crypto/random.ts';
+import { importKeyBytes } from '../../../src/key/import.ts';
 import { decryptCompact, encryptCompact } from '../../../src/jwe/compact.ts';
 import { generateKeyPair, generateSecret } from '../../../src/key/generate.ts';
 import { signCompact } from '../../../src/jws/sign.ts';
@@ -164,5 +166,69 @@ describe('key generation: encryption families', () => {
         'P-384',
       );
     }
+  });
+
+  test('generates AES key-wrapping secrets at the identifier size', () => {
+    for (const [algorithm, bytes] of [
+      ['A128KW', 16],
+      ['A192KW', 24],
+      ['A256KW', 32],
+      ['A128GCMKW', 16],
+      ['A256GCMKW', 32],
+    ] as const) {
+      const generated = generateSecret({ algorithm, contentAlgorithms: ['A128GCM'] });
+      assert.ok(generated.ok, algorithm);
+      assert.strictEqual(generated.key.operation, 'wrapKey');
+      assert.strictEqual((generated.key.material as Uint8Array).length, bytes);
+    }
+  });
+
+  test('sizes a `dir` secret from its single content algorithm', () => {
+    for (const [contentAlgorithm, bytes] of [
+      ['A128GCM', 16],
+      ['A256GCM', 32],
+      ['A128CBC-HS256', 32],
+      ['A256CBC-HS512', 64],
+    ] as const) {
+      const generated = generateSecret({ algorithm: 'dir', contentAlgorithms: [contentAlgorithm] });
+      assert.ok(generated.ok, contentAlgorithm);
+      assert.strictEqual(generated.key.operation, 'encrypt');
+      assert.strictEqual((generated.key.material as Uint8Array).length, bytes);
+    }
+  });
+
+  test('a generated `dir` secret round-trips through encrypt and decrypt', async () => {
+    const generated = generateSecret({ algorithm: 'dir', contentAlgorithms: ['A128CBC-HS256'] });
+    assert.ok(generated.ok);
+
+    const encrypted = await encryptCompact(PLAINTEXT, {
+      recipients: [{ key: generated.key }],
+      contentAlgorithm: 'A128CBC-HS256',
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['dir'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128CBC-HS256'], 'create'),
+      limits: LIMITS_V1,
+      random: systemRandom,
+    });
+    assert.ok(encrypted.ok);
+
+    // Generation binds one key to one operation, so the receiving side imports
+    // the same secret bound to `decrypt` rather than reusing the sending key.
+    const decryptionKey = importKeyBytes(
+      new TextEncoder().encode(
+        JSON.stringify({ kty: 'oct', k: encodeBase64url(generated.key.material as Uint8Array) }),
+      ),
+      { algorithm: 'dir', operation: 'decrypt', contentAlgorithms: ['A128CBC-HS256'] },
+    );
+    assert.ok(decryptionKey.ok);
+
+    const decrypted = await decryptCompact(encrypted.token, {
+      recipients: [{ principalId: 'recipient', key: decryptionKey.key }],
+      principalId: 'recipient',
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['dir'], 'receive'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128CBC-HS256'], 'receive'),
+      limits: LIMITS_V1,
+    });
+    assert.ok(decrypted.ok);
+    assert.deepStrictEqual(decrypted.plaintext, PLAINTEXT);
   });
 });
