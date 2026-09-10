@@ -76,9 +76,37 @@ describe('utf8Length', () => {
     assert.strictEqual(utf8Length('\ud800'), encodeUtf8('\ud800').length);
     assert.strictEqual(utf8Length('a\udc00b'), encodeUtf8('a\udc00b').length);
   });
+
+  test('matches UTF-8 encoding for every UTF-16 code unit and surrogate boundary', () => {
+    for (let code = 0; code <= 0xffff; code += 1) {
+      const sample = String.fromCharCode(code);
+      assert.strictEqual(utf8Length(sample), encodeUtf8(sample).length);
+    }
+    for (const sample of ['\ud800\udc00', '\udbff\udfff', '\ud800\ud800', '\udc00\ud800', 'x'.repeat(8192) + 'é😀']) {
+      assert.strictEqual(utf8Length(sample), encodeUtf8(sample).length);
+    }
+  });
 });
 
 describe('encodeAscii', () => {
+  test('preserves exact bytes and rejects non-ASCII around the native-path boundary', () => {
+    for (const length of [255, 256, 257, 8192]) {
+      const input = 'a'.repeat(length);
+      const result = encodeAscii(input);
+      assert.deepStrictEqual(result, { ok: true, bytes: encodeUtf8(input) });
+      for (const position of [0, Math.floor(length / 2), length - 1]) {
+        for (const character of ['\u0080', 'é', '\ud800', '\udc00', '😀', '\ufeff']) {
+          assert.deepStrictEqual(encodeAscii(input.slice(0, position) + character + input.slice(position + 1)), {
+            ok: false,
+            failure: 'non_ascii',
+          });
+        }
+      }
+    }
+    const controls = String.fromCharCode(...Array.from({ length: 128 }, (_, code) => code)).repeat(4);
+    assert.deepStrictEqual(encodeAscii(controls), { ok: true, bytes: encodeUtf8(controls) });
+  });
+
   test('encodes ASCII to its octets', () => {
     const result = encodeAscii('eyJ0eXAiOiJKV1QifQ.QUJD');
     assert.strictEqual(result.ok, true);
