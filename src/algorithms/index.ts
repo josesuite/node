@@ -6,6 +6,13 @@
  * of the received header. A failed verification is never retried under another
  * hash, curve, or key interpretation: doing so would let an attacker pick the
  * check their forgery can pass.
+ *
+ * The key record is also handed to each adapter as the token under which its
+ * provider handle is memoized. That is sound precisely because of the binding
+ * above: one record names one algorithm and one operation for its whole
+ * lifetime, so the handle derived from it cannot be reused under a second
+ * interpretation. The polymorphic EdDSA identifier is no exception, because the
+ * curve it resolves to is required to equal the record's own curve.
  */
 
 import { backendError, type BackendResult } from '../internal/crypto/backend.ts';
@@ -74,19 +81,19 @@ export async function signWithKey(
       if (key.keyType !== 'oct') {
         return backendError('operation_failed');
       }
-      return computeHmac(key.algorithm, key.material, signingInput);
+      return computeHmac(key.algorithm, key.material, signingInput, key);
     }
     case 'rsa-pkcs1': {
       if (key.keyType !== 'RSA') {
         return backendError('operation_failed');
       }
-      return signRsaPkcs1(key.algorithm, key.material, signingInput);
+      return signRsaPkcs1(key.algorithm, key.material, signingInput, key);
     }
     case 'rsa-pss': {
       if (key.keyType !== 'RSA') {
         return backendError('operation_failed');
       }
-      return signRsaPss(key.algorithm, key.material, signingInput);
+      return signRsaPss(key.algorithm, key.material, signingInput, key);
     }
     case 'ecdsa': {
       if (key.keyType !== 'EC') {
@@ -100,6 +107,7 @@ export async function signWithKey(
         key.algorithm,
         { crv: material.curve, x: material.x, y: material.y, d: material.d },
         signingInput,
+        key,
       );
     }
     case 'eddsa': {
@@ -119,7 +127,7 @@ export async function signWithKey(
       if (parameters.curve !== material.curve) {
         return backendError('operation_failed');
       }
-      return signEddsa(parameters, { x: material.x, d: material.d }, signingInput);
+      return signEddsa(parameters, { x: material.x, d: material.d }, signingInput, key);
     }
   }
 }
@@ -151,26 +159,32 @@ export async function verifyWithKey(
       if (key.keyType !== 'oct') {
         return backendError('operation_failed');
       }
-      return verifyHmac(key.algorithm, key.material, signingInput, signature);
+      return verifyHmac(key.algorithm, key.material, signingInput, signature, key);
     }
     case 'rsa-pkcs1': {
       if (key.keyType !== 'RSA') {
         return backendError('operation_failed');
       }
-      return verifyRsaPkcs1(key.algorithm, key.material, signingInput, signature);
+      return verifyRsaPkcs1(key.algorithm, key.material, signingInput, signature, key);
     }
     case 'rsa-pss': {
       if (key.keyType !== 'RSA') {
         return backendError('operation_failed');
       }
-      return verifyRsaPss(key.algorithm, key.material, signingInput, signature);
+      return verifyRsaPss(key.algorithm, key.material, signingInput, signature, key);
     }
     case 'ecdsa': {
       if (key.keyType !== 'EC') {
         return backendError('operation_failed');
       }
       const material = key.material;
-      return verifyEcdsa(key.algorithm, { crv: material.curve, x: material.x, y: material.y }, signingInput, signature);
+      return verifyEcdsa(
+        key.algorithm,
+        { crv: material.curve, x: material.x, y: material.y },
+        signingInput,
+        signature,
+        key,
+      );
     }
     case 'eddsa': {
       if (key.keyType !== 'OKP') {
@@ -186,7 +200,7 @@ export async function verifyWithKey(
       if (parameters.curve !== material.curve) {
         return backendError('operation_failed');
       }
-      return verifyEddsa(parameters, { x: material.x }, signingInput, signature);
+      return verifyEddsa(parameters, { x: material.x }, signingInput, signature, key);
     }
   }
 }
