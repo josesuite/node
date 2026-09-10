@@ -1177,3 +1177,71 @@ function assertCreationFailure(result: Awaited<ReturnType<typeof encryptJson>>, 
   }
 }
 
+describe('creation-side header validation', () => {
+  const ENC = 'A128GCM';
+
+  async function encryptEcdh(protectedHeader: Readonly<Record<string, string | boolean | string[]>>) {
+    const pair = ecPair('ECDH-ES', 'P-256', [ENC]);
+    return encryptJson(PLAINTEXT, {
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['ECDH-ES'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', [ENC], 'create'),
+      contentAlgorithm: ENC,
+      recipients: [{ key: pair.encryption }],
+      limits: LIMITS_V1,
+      random: systemRandom,
+      nonceAllocator: allocator(),
+      protectedHeader,
+    });
+  }
+
+  test('rejects party info supplied outside an agreement algorithm', async () => {
+    // A producer setting these expects them bound into a derivation that never
+    // runs, so they are refused rather than serialized as inert members.
+    const pair = symmetric('A256KW', 32);
+    const result = await encryptJson(PLAINTEXT, {
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', [ENC], 'create'),
+      contentAlgorithm: ENC,
+      recipients: [{ key: pair.encryption }],
+      limits: LIMITS_V1,
+      random: systemRandom,
+      nonceAllocator: allocator(),
+      protectedHeader: { apu: Buffer.from([1, 2, 3]).toString('base64url') },
+    });
+    assertCreationFailure(result, 'party_info_requires_agreement_algorithm');
+  });
+
+  test('requires party info to be decodable base64url strings', async () => {
+    for (const member of ['apu', 'apv'] as const) {
+      assertCreationFailure(await encryptEcdh({ [member]: 'not base64url!' }), `${member}_invalid_base64url`);
+    }
+  });
+
+  test('rejects a protected header larger than its bound', async () => {
+    const pair = symmetric('A256KW', 32);
+    const result = await encryptJson(PLAINTEXT, {
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', [ENC], 'create'),
+      contentAlgorithm: ENC,
+      recipients: [{ key: pair.encryption }],
+      limits: lowerLimits({ headerSource: 16 }),
+      random: systemRandom,
+      nonceAllocator: allocator(),
+    });
+    assertCreationFailure(result, 'header_too_large');
+  });
+
+  test('rejects a content algorithm outside the policy or outside support', async () => {
+    const pair = symmetric('A256KW', 32);
+    const result = await encryptJson(PLAINTEXT, {
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A256GCM'], 'create'),
+      contentAlgorithm: ENC,
+      recipients: [{ key: pair.encryption }],
+      limits: LIMITS_V1,
+      random: systemRandom,
+      nonceAllocator: allocator(),
+    });
+    assert.strictEqual(result.ok, false);
+  });
+});
