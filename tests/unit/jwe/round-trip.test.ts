@@ -1032,3 +1032,148 @@ describe('resource limits reach the whole operation', () => {
     }
   });
 });
+
+/** Rewrites the protected header of a serialized object. */
+function withHeader(serialized: string, members: Record<string, unknown>): string {
+  const parsed = JSON.parse(serialized) as Record<string, unknown>;
+  const header = JSON.parse(Buffer.from(parsed['protected'] as string, 'base64url').toString('utf8')) as Record<
+    string,
+    unknown
+  >;
+  const merged: Record<string, unknown> = { ...header, ...members };
+  for (const [name, value] of Object.entries(members)) {
+    if (value === undefined) {
+      delete merged[name];
+    }
+  }
+  return JSON.stringify({
+    ...parsed,
+    protected: Buffer.from(JSON.stringify(merged)).toString('base64url'),
+  });
+}
+
+function assertHeaderFailure(result: Awaited<ReturnType<typeof decrypt>>, reason: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.stage, 'header');
+    assert.strictEqual(result.reason, reason);
+  }
+}
+
+function encodeShort(): string {
+  return Buffer.alloc(8, 1).toString('base64url');
+}
+
+describe('ECDH-ES agreement header validation', () => {
+  async function agreementObject(algorithm = 'ECDH-ES') {
+    const pair = ecPair(algorithm);
+    const result = await encrypt([pair], [algorithm], 'A128GCM');
+    if (!result.ok) {
+      throw new Error(`encrypt failed: ${result.reason}`);
+    }
+    return { serialized: result.value, pair };
+  }
+
+  async function decryptWith(serialized: string, pair: ReturnType<typeof ecPair>, algorithm = 'ECDH-ES') {
+    return decrypt(serialized, [{ principalId: 'alice', key: pair.decryption }], [algorithm], 'A128GCM');
+  }
+
+  test('requires an epk that is present and an object', async () => {
+    const { serialized, pair } = await agreementObject();
+
+    assertHeaderFailure(await decryptWith(withHeader(serialized, { epk: undefined }), pair), 'epk_missing');
+
+    // A present `epk` of the wrong JSON type is caught by the registered
+    // parameter type check that precedes the agreement reader.
+    for (const epk of ['not an object', 1, true, null, []]) {
+      assertHeaderFailure(await decryptWith(withHeader(serialized, { epk }), pair), 'parameter_not_an_object');
+    }
+  });
+
+  test('refuses an epk carrying private key material', async () => {
+    const { serialized, pair } = await agreementObject();
+    const parsed = JSON.parse(serialized) as Record<string, unknown>;
+    const header = JSON.parse(Buffer.from(parsed['protected'] as string, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    const epk = header['epk'] as Record<string, unknown>;
+
+    // A private member means the sender leaked their own key or is substituting
+    // one, so the object is refused rather than the member ignored.
+    const result = await decryptWith(withHeader(serialized, { epk: { ...epk, d: 'AAAA' } }), pair);
+    assertHeaderFailure(result, 'epk_carries_private_key');
+  });
+
+  test('requires the epk to be complete and internally consistent', async () => {
+    const { serialized, pair } = await agreementObject();
+    const parsed = JSON.parse(serialized) as Record<string, unknown>;
+    const header = JSON.parse(Buffer.from(parsed['protected'] as string, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    const epk = header['epk'] as Record<string, unknown>;
+
+    for (const missing of ['kty', 'crv', 'x'] as const) {
+      const incomplete = { ...epk };
+      delete incomplete[missing];
+      assertHeaderFailure(await decryptWith(withHeader(serialized, { epk: incomplete }), pair), 'epk_incomplete');
+    }
+
+    // The key type is decided by the curve, so a header naming one that
+    // disagrees does not describe the key it carries.
+    assertHeaderFailure(
+      await decryptWith(withHeader(serialized, { epk: { ...epk, kty: 'OKP' } }), pair),
+      'epk_kty_does_not_match_curve',
+    );
+
+    assertHeaderFailure(
+      await decryptWith(withHeader(serialized, { epk: { ...epk, crv: 'P-999' } }), pair),
+      'epk_curve_not_usable_for_agreement',
+    );
+  });
+
+  test('requires each epk coordinate to decode to the curve width', async () => {
+    const { serialized, pair } = await agreementObject();
+    const parsed = JSON.parse(serialized) as Record<string, unknown>;
+    const header = JSON.parse(Buffer.from(parsed['protected'] as string, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    const epk = header['epk'] as Record<string, unknown>;
+
+    assertHeaderFailure(
+      await decryptWith(withHeader(serialized, { epk: { ...epk, x: 'not base64url!' } }), pair),
+      'epk_x_invalid_base64url',
+    );
+    assertHeaderFailure(
+      await decryptWith(withHeader(serialized, { epk: { ...epk, x: encodeShort() } }), pair),
+      'epk_x_wrong_length',
+    );
+    assertHeaderFailure(
+      await decryptWith(withHeader(serialized, { epk: { ...epk, y: 'not base64url!' } }), pair),
+      'epk_y_invalid_base64url',
+    );
+    assertHeaderFailure(
+      await decryptWith(withHeader(serialized, { epk: { ...epk, y: encodeShort() } }), pair),
+      'epk_y_wrong_length',
+    );
+  });
+
+  test('rejects party info that is not decodable base64url', async () => {
+    const { serialized, pair } = await agreementObject();
+
+    for (const member of ['apu', 'apv'] as const) {
+      const result = await decryptWith(withHeader(serialized, { [member]: 'not base64url!' }), pair);
+      assertHeaderFailure(result, `${member}_invalid_base64url`);
+    }
+  });
+});
+
+function assertCreationFailure(result: Awaited<ReturnType<typeof encryptJson>>, reason: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.reason, reason);
+  }
+}
+
