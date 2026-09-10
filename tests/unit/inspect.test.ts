@@ -92,4 +92,32 @@ describe('unverified header inspection', () => {
     });
     assert.strictEqual(verified.ok, false);
   });
+
+  test('requires the serialization the caller configured', () => {
+    const jws = tokenWithHeader({ alg: 'ES256' });
+
+    const asJwe = inspectUnverifiedHeader(jws, { serialization: 'jwe-compact' });
+    assert.strictEqual(asJwe.ok, false);
+    assert.strictEqual(asJwe.category, 'malformed_input');
+    assert.strictEqual(asJwe.reason, 'compact_component_count');
+
+    const asJws = inspectUnverifiedHeader(`${jws}.extra.parts`, { serialization: 'jws-compact' });
+    assert.strictEqual(asJws.ok, false);
+    assert.strictEqual(asJws.reason, 'too_many_components');
+  });
+
+  test('rejects wrong component counts and empty required components', () => {
+    const header = encodeBase64url(encoder.encode(JSON.stringify({ alg: 'ES256' })));
+
+    for (const [token, reason] of [
+      [header, 'missing_separator'],
+      [`${header}.payload`, 'missing_separator'],
+      [`.payload.${header}`, 'empty_protected_header'],
+      [`${header}.payload.`, 'empty_signature'],
+    ] as const) {
+      const result = inspectUnverifiedHeader(token, { serialization: 'jws-compact' });
+      assert.strictEqual(result.ok, false, token);
+      assert.strictEqual(result.reason, reason);
+    }
+  });
 });
