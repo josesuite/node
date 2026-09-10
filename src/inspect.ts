@@ -19,6 +19,7 @@
  */
 
 import type { ErrorCategory } from './errors/codes.ts';
+import type { JsonObject, JsonValue } from './internal/json/types.ts';
 import type { Limits } from './policy/limits.ts';
 
 /**
@@ -67,4 +68,27 @@ type InspectFailure = { readonly ok: false; readonly category: ErrorCategory; re
 
 function reject(reason: string, category: ErrorCategory = 'malformed_input'): InspectFailure {
   return { ok: false, category, reason };
+}
+
+/** Converts a parsed JSON value to plain data, keeping numbers as lexemes. */
+function toPlainJson(value: JsonValue): unknown {
+  switch (value.kind) {
+    case 'object': {
+      const object: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+      for (const [name, member] of value.members) {
+        object[name] = toPlainJson(member);
+      }
+      return Object.freeze(object);
+    }
+    case 'array':
+      return Object.freeze(value.elements.map(toPlainJson));
+    case 'string':
+      return value.value;
+    case 'number':
+      return value.lexeme;
+    case 'boolean':
+      return value.value;
+    case 'null':
+      return null;
+  }
 }
