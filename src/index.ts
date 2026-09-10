@@ -6,3 +6,5 @@ export * from './jwe/index.ts';
 export * from './jwt/index.ts';
 export * from './jwk/index.ts';
 export * from './policy/index.ts';
+export { inspectUnverifiedHeader } from './inspect.ts';
+export type { InspectOptions, InspectResult, InspectSerialization, UnverifiedHeader } from './inspect.ts';
