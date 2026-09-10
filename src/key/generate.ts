@@ -15,6 +15,9 @@
  * applied here rather than assumed.
  */
 
+import { generateKeyPair as nodeGenerateKeyPair } from 'node:crypto';
+import { promisify } from 'node:util';
+
 import { contentEncryptionShape } from '../algorithms/content-encryption/index.ts';
 import { hmacOutputBytes } from '../algorithms/jws/hmac.ts';
 import { keyManagementShape } from '../algorithms/jwe/index.ts';
@@ -22,7 +25,7 @@ import { isQualifiedAlgorithm, lookupAlgorithm } from '../algorithms/registry.ts
 import type { ErrorCategory } from '../errors/codes.ts';
 import { type ImportResult, importKeyBytes, type UsableKey } from './import.ts';
 import type { EcCurve, KeyOperation } from './types.ts';
-import type { Limits } from '../policy/limits.ts';
+import { type Limits, LIMITS_V1 } from '../policy/limits.ts';
 
 /** RSA-02: the only public exponent this library generates. */
 const RSA_EXPONENT = 65537;
@@ -199,6 +202,106 @@ const AGREEMENT_CURVES: ReadonlySet<string> = new Set<EcCurve>(['P-256', 'P-384'
  * which is the component that decides what a valid key looks like.
  */
 type ExportedJwk = Readonly<Record<string, unknown>>;
+
+type MaterialResult =
+  | { readonly ok: true; readonly privateJwk: ExportedJwk; readonly publicJwk: ExportedJwk }
+  | EligibilityFailure;
+
+const generateKeyPairAsync = promisify(nodeGenerateKeyPair);
+
+/**
+ * Produces raw key material from the provider as a JWK pair.
+ *
+ * Asymmetric generation is asynchronous because RSA generation is expensive
+ * enough to stall an event loop for a noticeable interval at these sizes.
+ */
+async function generateMaterial(options: GenerateKeyOptions): Promise<MaterialResult> {
+  const limits = options.limits ?? LIMITS_V1;
+
+  if (options.algorithm.startsWith('RSA-OAEP') || /^(RS|PS)(256|384|512)$/.test(options.algorithm)) {
+    const modulusBits = options.modulusBits ?? RSA_MINIMUM_MODULUS_BITS;
+    if (!Number.isSafeInteger(modulusBits) || modulusBits < RSA_MINIMUM_MODULUS_BITS) {
+      return reject('modulus_below_modern_floor');
+    }
+    if (modulusBits > limits.rsaModulusBits) {
+      return reject('modulus_too_large', 'resource_limit');
+    }
+    return exportRsaPair(modulusBits);
+  }
+
+  const ecdsaCurve = ECDSA_CURVES[options.algorithm];
+  if (ecdsaCurve !== undefined) {
+    // The identifier fixes the curve, so a conflicting configured curve is a
+    // contradiction rather than a value to prefer one way or the other.
+    if (options.curve !== undefined && options.curve !== ecdsaCurve) {
+      return reject('curve_not_eligible_for_algorithm', 'incompatible_key');
+    }
+    return exportEcPair(ecdsaCurve);
+  }
+
+  const mode = keyManagementShape(options.algorithm)?.mode;
+  if (mode === 'direct_agreement' || mode === 'agreement_with_wrapping') {
+    const curve = options.curve;
+    if (curve === undefined) {
+      return reject('curve_required_for_agreement_algorithm');
+    }
+    if (!AGREEMENT_CURVES.has(curve)) {
+      return reject('curve_not_eligible_for_algorithm', 'incompatible_key');
+    }
+    return exportEcPair(curve);
+  }
+
+  // No currently registered creation algorithm reaches this point; the earlier
+  // eligibility and operation-family checks account for every one. It stays as
+  // a fail-closed default so that adding a registry row without adding its
+  // generation parameters refuses the request rather than producing a key from
+  // provider defaults.
+  return reject('algorithm_unsupported_for_generation', 'unsupported_algorithm');
+}
+
+/**
+ * A provider failure is reported as a backend failure carrying no detail from
+ * the underlying error, which could otherwise quote key material.
+ */
+async function exportRsaPair(modulusBits: number): Promise<MaterialResult> {
+  try {
+    const pair = await generateKeyPairAsync('rsa', {
+      modulusLength: modulusBits,
+      publicExponent: RSA_EXPONENT,
+      publicKeyEncoding: { format: 'jwk' },
+      privateKeyEncoding: { format: 'jwk' },
+    });
+    return asMaterial(pair);
+  } catch {
+    return reject('key_generation_failed', 'backend_failure');
+  }
+}
+
+async function exportEcPair(curve: EcCurve): Promise<MaterialResult> {
+  try {
+    const pair = await generateKeyPairAsync('ec', {
+      namedCurve: PROVIDER_CURVES[curve]!,
+      publicKeyEncoding: { format: 'jwk' },
+      privateKeyEncoding: { format: 'jwk' },
+    });
+    return asMaterial(pair);
+  } catch {
+    return reject('key_generation_failed', 'backend_failure');
+  }
+}
+
+/**
+ * The `jwk` encoding is declared to the provider above, but its overloads type
+ * the result by the encoding's string/Buffer forms rather than by the object
+ * a `jwk` export actually returns, so the shape is restated here.
+ */
+function asMaterial(pair: { readonly publicKey: unknown; readonly privateKey: unknown }): MaterialResult {
+  return {
+    ok: true,
+    privateJwk: pair.privateKey as ExportedJwk,
+    publicJwk: pair.publicKey as ExportedJwk,
+  };
+}
 
 interface AdmitOptions {
   readonly algorithm: string;
