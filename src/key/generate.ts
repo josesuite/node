@@ -173,6 +173,25 @@ const AES_KEY_BYTES: Readonly<Record<string, number>> = Object.freeze({
   A256GCMKW: 32,
 });
 
+/** Curve each ECDSA identifier fixes, so it is never taken from configuration. */
+const ECDSA_CURVES: Readonly<Record<string, EcCurve>> = Object.freeze({
+  ES256: 'P-256',
+  ES384: 'P-384',
+  ES512: 'P-521',
+  ES256K: 'secp256k1',
+});
+
+/** Provider curve names, keyed by the JOSE curve identifier. */
+const PROVIDER_CURVES: Readonly<Record<string, string>> = Object.freeze({
+  'P-256': 'prime256v1',
+  'P-384': 'secp384r1',
+  'P-521': 'secp521r1',
+  secp256k1: 'secp256k1',
+});
+
+/** Curves an agreement algorithm may use, since it names none itself. */
+const AGREEMENT_CURVES: ReadonlySet<string> = new Set<EcCurve>(['P-256', 'P-384', 'P-521']);
+
 /**
  * A provider-exported JWK, treated as opaque JSON.
  *
