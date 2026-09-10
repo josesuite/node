@@ -558,3 +558,70 @@ describe('metadata size limits', () => {
     assert.strictEqual(result.ok, true);
   });
 });
+
+function assertRejected(result: ReturnType<typeof importKey>, reason: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.reason, reason);
+  }
+}
+
+/** Encodes a big-endian unsigned integer in the minimal form JWK requires. */
+function uint(value: bigint): string {
+  let hex = value.toString(16);
+  if (hex.length % 2 === 1) {
+    hex = `0${hex}`;
+  }
+  return Buffer.from(hex, 'hex').toString('base64url');
+}
+
+function big(jwk: Record<string, string>, member: string): bigint {
+  return BigInt(`0x${Buffer.from(jwk[member]!, 'base64url').toString('hex')}`);
+}
+
+describe('RSA material validation', () => {
+  /** Mutates one supplied key so overrides stay consistent with its own members. */
+  function importRsa(jwk: Record<string, string>, overrides: Record<string, unknown>) {
+    return importKey(object({ ...jwk, ...overrides }), RSA_SIGN);
+  }
+
+  test('rejects a modulus that is even', async () => {
+    // Not a product of two odd primes, so it cannot be a valid RSA modulus
+    // regardless of its size.
+    const jwk = rsaJwk();
+    const n = BigInt(`0x${Buffer.from(jwk['n']!, 'base64url').toString('hex')}`);
+    assertRejected(importRsa(jwk, { n: uint(n + 1n) }), 'n_even');
+  });
+
+  test('admits the 2048-bit range only under an explicitly receive-only binding', async () => {
+    const jwk = object(rsaJwk(2048));
+    assertRejected(importKey(jwk, RSA_SIGN), 'n_too_small');
+    assertRejected(importKey(jwk, { algorithm: 'RS256', operation: 'verify' }), 'n_too_small');
+
+    const receiving = importKey(jwk, { algorithm: 'RS256', operation: 'verify', receiveOnly: true });
+    assert.strictEqual(receiving.ok, true);
+  });
+
+  test('rejects an exponent that is even, too small, or not less than the modulus', async () => {
+    const jwk = rsaJwk();
+    const n = BigInt(`0x${Buffer.from(jwk['n']!, 'base64url').toString('hex')}`);
+
+    assertRejected(importRsa(jwk, { e: uint(4n) }), 'e_even');
+    assertRejected(importRsa(jwk, { e: uint(1n) }), 'e_too_small');
+    // Bounded to 32 bits, so an exponent at or above the modulus is refused on
+    // its own decode allowance before the comparison is reached.
+    assert.strictEqual(importRsa(jwk, { e: uint(n) }).ok, false);
+  });
+
+  test('rejects members that are not minimally encoded unsigned integers', async () => {
+    // A leading zero octet is not the minimal encoding, which would let one
+    // value be written several ways.
+    const jwk = rsaJwk();
+    const padded = Buffer.concat([Buffer.alloc(1), Buffer.from(jwk['n']!, 'base64url')]);
+    assert.strictEqual(importRsa(jwk, { n: padded.toString('base64url') }).ok, false);
+
+    assert.strictEqual(importRsa(jwk, { n: '' }).ok, false);
+    assert.strictEqual(importRsa(jwk, { n: 'not base64url!' }).ok, false);
+  });
+});
+
