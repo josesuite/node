@@ -741,3 +741,148 @@ describe('resource limits reach the whole operation', () => {
     }
   });
 });
+
+function rewriteHeader(token: string, members: Record<string, unknown>): string {
+  const [header, payload, signature] = token.split('.');
+  const decoded = JSON.parse(Buffer.from(header!, 'base64url').toString('utf8')) as Record<string, unknown>;
+  const merged: Record<string, unknown> = { ...decoded, ...members };
+  for (const [name, value] of Object.entries(members)) {
+    if (value === undefined) {
+      delete merged[name];
+    }
+  }
+  return `${Buffer.from(JSON.stringify(merged)).toString('base64url')}.${payload}.${signature}`;
+}
+
+function assertVerifyFailure(result: Awaited<ReturnType<typeof verifyCompact>>, reason: string, stage?: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.reason, reason);
+    if (stage !== undefined) {
+      assert.strictEqual(result.stage, stage);
+    }
+  }
+}
+
+describe('compact verification failure paths', () => {
+  test('rejects limits that were never lowered from the baseline', async () => {
+    const pair = ecPair();
+    const token = await signWith(pair.signing, 'ES256');
+
+    const result = await verifyWith(token, pair.verification, 'ES256', {
+      limits: { ...LIMITS_V1, signatureOctets: LIMITS_V1.signatureOctets + 1 },
+    });
+    assertVerifyFailure(result, 'limit_signatureOctets_exceeds_baseline', 'configuration');
+  });
+
+  test('rejects a protected header that is not valid base64url or JSON', async () => {
+    const pair = ecPair();
+    const token = await signWith(pair.signing, 'ES256');
+    const [, payload, signature] = token.split('.');
+
+    const badEncoding = await verifyWith(`not base64url!.${payload}.${signature}`, pair.verification, 'ES256');
+    assertVerifyFailure(badEncoding, 'protected_header_invalid_base64url', 'syntax');
+
+    const notJson = Buffer.from('{not json').toString('base64url');
+    const badJson = await verifyWith(`${notJson}.${payload}.${signature}`, pair.verification, 'ES256');
+    assert.strictEqual(badJson.ok, false);
+    if (!badJson.ok) {
+      assert.strictEqual(badJson.stage, 'syntax');
+    }
+
+    const oversized = await verifyWith(token, pair.verification, 'ES256', {
+      limits: lowerLimits({ headerSource: 4 }),
+    });
+    assertVerifyFailure(oversized, 'protected_header_too_large', 'syntax');
+  });
+
+  test('requires alg to be present, a string, and covered by the signature', async () => {
+    const pair = ecPair();
+    const token = await signWith(pair.signing, 'ES256');
+
+    assertVerifyFailure(
+      await verifyWith(rewriteHeader(token, { alg: undefined }), pair.verification, 'ES256'),
+      'alg_missing',
+    );
+
+    for (const alg of [1, null, true]) {
+      const result = await verifyWith(rewriteHeader(token, { alg }), pair.verification, 'ES256');
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.stage, 'header');
+      }
+    }
+  });
+
+  test('requires the key binding to match the algorithm and the verify operation', async () => {
+    const pair = ecPair();
+    const other = ecPair('ES384', 'P-384');
+    const token = await signWith(pair.signing, 'ES256');
+
+    // A key bound to another algorithm is refused on its binding, which is what
+    // stops a public key being accepted where a MAC secret is expected.
+    const mismatch = await verifyCompact(token, {
+      policy: AlgorithmPolicy.create('jws', ['ES256', 'ES384'], 'receive'),
+      key: other.verification,
+      principalId: 'signer-a',
+      limits: LIMITS_V1,
+    });
+    assertVerifyFailure(mismatch, 'key_algorithm_mismatch', 'key_resolution');
+
+    const signingKey = await verifyCompact(token, {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+      key: pair.signing,
+      principalId: 'signer-a',
+      limits: LIMITS_V1,
+    });
+    assertVerifyFailure(signingKey, 'key_operation_mismatch', 'key_resolution');
+  });
+
+  test('applies a present kid as an exact filter even with one configured key', async () => {
+    const pair = ecPair();
+    const token = await signWith(pair.signing, 'ES256', PAYLOAD, { protectedHeader: { kid: 'other-key' } });
+
+    // Ignoring the hint would verify a token naming an untrusted key against
+    // whichever key the caller happened to supply.
+    const result = await verifyWith(token, pair.verification, 'ES256');
+    assertVerifyFailure(result, 'kid_does_not_match_configured_key', 'key_resolution');
+  });
+
+  test('rejects a signature component that is not valid base64url or exceeds its bound', async () => {
+    const pair = ecPair();
+    const token = await signWith(pair.signing, 'ES256');
+    const [header, payload] = token.split('.');
+
+    const badEncoding = await verifyWith(`${header}.${payload}.not base64url!`, pair.verification, 'ES256');
+    assertVerifyFailure(badEncoding, 'signature_invalid_base64url', 'syntax');
+
+    const oversized = await verifyWith(token, pair.verification, 'ES256', {
+      limits: lowerLimits({ signatureOctets: 8 }),
+    });
+    assertVerifyFailure(oversized, 'signature_too_large', 'syntax');
+  });
+
+  test('reports a signature that does not verify without revealing the key step', async () => {
+    const pair = ecPair();
+    const other = ecPair();
+    const token = await signWith(pair.signing, 'ES256');
+
+    const result = await verifyWith(token, other.verification, 'ES256');
+    assertVerifyFailure(result, 'signature_did_not_verify', 'cryptographic');
+  });
+
+  test('bounds the cryptographic layers and attempts a single call may consume', async () => {
+    const pair = ecPair();
+    const token = await signWith(pair.signing, 'ES256');
+
+    const layers = await verifyWith(token, pair.verification, 'ES256', {
+      limits: lowerLimits({ cryptographicLayers: 0 }),
+    });
+    assertVerifyFailure(layers, 'too_many_cryptographic_layers', 'syntax');
+
+    const attempts = await verifyWith(token, pair.verification, 'ES256', {
+      limits: lowerLimits({ cryptographicAttempts: 0 }),
+    });
+    assertVerifyFailure(attempts, 'cryptographic_attempt_budget_exceeded', 'cryptographic');
+  });
+});
