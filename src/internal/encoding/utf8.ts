@@ -52,28 +52,5 @@ export function encodeUtf8(text: string): Uint8Array {
 
 /** UTF-8 octet length without materializing the encoded bytes. */
 export function utf8Length(text: string): number {
-  let length = 0;
-
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-
-    if (code < 0x80) {
-      length += 1;
-    } else if (code < 0x800) {
-      length += 2;
-    } else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
-      const next = text.charCodeAt(i + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        // A well-formed surrogate pair is one 4-octet scalar value.
-        length += 4;
-        i += 1;
-        continue;
-      }
-      length += 3;
-    } else {
-      length += 3;
-    }
-  }
-
-  return length;
+  return Buffer.byteLength(text, 'utf8');
 }
