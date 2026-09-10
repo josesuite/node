@@ -3,7 +3,7 @@
  * padding, and no whitespace or line breaks. This differs from the ordinary
  * Base64 used by certificate chains, which is padded and uses `+` and `/`.
  *
- * Node's `Buffer.from(s, 'base64url')` is unusable here: it silently ignores
+ * Node's native decoder alone is insufficient here: it silently ignores
  * invalid characters, accepts padding and whitespace, and discards nonzero
  * unused bits, so it cannot distinguish a canonical encoding from a malleable
  * one. Several distinct inputs would decode to the same octets, which lets an
@@ -84,6 +84,21 @@ export function decodeBase64url(input: string, maxDecodedBytes: number): Base64u
     return { ok: false, failure: 'too_large' };
   }
 
+  // Native decoding pays off for large components, after strict validation.
+  // Keep short headers and signatures on the lower-overhead loop below.
+  if (length >= 512) {
+    if (/[^A-Za-z0-9_-]/.test(input)) {
+      return { ok: false, failure: 'alphabet' };
+    }
+    const remaining = length % 4;
+    if (remaining !== 0 && (sextet(input.charCodeAt(length - 1)) & (remaining === 2 ? 15 : 3)) !== 0) {
+      return { ok: false, failure: 'unused_bits' };
+    }
+    const bytes = new Uint8Array(outputLength);
+    Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).write(input, 'base64url');
+    return { ok: true, bytes };
+  }
+
   const output = new Uint8Array(outputLength);
 
   // Whole groups of four characters yield three octets each. Handling a group at
@@ -145,7 +160,7 @@ export function decodeBase64url(input: string, maxDecodedBytes: number): Base64u
 /**
  * Encodes strict unpadded Base64url.
  *
- * Encoding is delegated to the runtime's native encoder, unlike decoding: every
+ * Encoding is delegated to the runtime's native encoder: every
  * octet string has exactly one unpadded Base64url encoding, so there is no
  * malleability for a lenient implementation to introduce here. Node emits the
  * URL-safe alphabet with no padding, which is the form JOSE requires, and does
