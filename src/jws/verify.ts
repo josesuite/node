@@ -294,7 +294,7 @@ function resolvePayload(
   if (!encoded) {
     // An inline unencoded payload is the raw component bytes. Compact form
     // excludes the period, which the component split has already guaranteed.
-    const octets = new TextEncoder().encode(component);
+    const octets = encodeUtf8(component);
     if (octets.length > options.limits.payload) {
       return { ok: false, failure: fail('syntax', 'resource_limit', 'payload_too_large') };
     }
