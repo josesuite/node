@@ -20,7 +20,7 @@ import { hmacOutputBytes } from '../algorithms/jws/hmac.ts';
 import { keyManagementShape } from '../algorithms/jwe/index.ts';
 import { isQualifiedAlgorithm, lookupAlgorithm } from '../algorithms/registry.ts';
 import type { ErrorCategory } from '../errors/codes.ts';
-import type { UsableKey } from './import.ts';
+import { type ImportResult, importKeyBytes, type UsableKey } from './import.ts';
 import type { EcCurve, KeyOperation } from './types.ts';
 import type { Limits } from '../policy/limits.ts';
 
@@ -172,3 +172,38 @@ const AES_KEY_BYTES: Readonly<Record<string, number>> = Object.freeze({
   A192GCMKW: 24,
   A256GCMKW: 32,
 });
+
+/**
+ * A provider-exported JWK, treated as opaque JSON.
+ *
+ * The members are never read here: the material goes straight to the importer,
+ * which is the component that decides what a valid key looks like.
+ */
+type ExportedJwk = Readonly<Record<string, unknown>>;
+
+interface AdmitOptions {
+  readonly algorithm: string;
+  readonly operation: KeyOperation;
+  readonly contentAlgorithms: readonly string[] | undefined;
+  readonly limits: Limits;
+}
+
+/**
+ * Admits generated material through the ordinary import path.
+ *
+ * Serializing to JWK bytes rather than calling the parsed-object importer keeps
+ * generation on the one public admission path, so generated and imported keys
+ * cannot diverge in which checks they have passed.
+ */
+function admit(jwk: ExportedJwk, options: AdmitOptions): ImportResult {
+  const bytes = new TextEncoder().encode(JSON.stringify(jwk));
+  return importKeyBytes(
+    bytes,
+    {
+      algorithm: options.algorithm,
+      operation: options.operation,
+      ...(options.contentAlgorithms === undefined ? {} : { contentAlgorithms: options.contentAlgorithms }),
+    },
+    options.limits,
+  );
+}
