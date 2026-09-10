@@ -11,7 +11,7 @@
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
 import { constantTime } from '../../internal/crypto/constant-time.ts';
-import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
+import { attempt, importCached, importRaw } from '../../internal/crypto/webcrypto.ts';
 
 interface HmacParameters {
   readonly hash: string;
@@ -33,6 +33,7 @@ export async function computeHmac(
   algorithm: string,
   key: Uint8Array,
   signingInput: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<Uint8Array>> {
   const parameters = HMAC_ALGORITHMS[algorithm];
   if (parameters === undefined) {
@@ -47,7 +48,11 @@ export async function computeHmac(
   }
 
   const result = await attempt(async () => {
-    const handle = await importRaw(key, { name: 'HMAC', hash: parameters.hash }, ['sign']);
+    // Verification computes the expected MAC through this same path, so a
+    // signing usage is the only one a cached handle is ever asked for.
+    const handle = await importCached(handleToken, () =>
+      importRaw(key, { name: 'HMAC', hash: parameters.hash }, ['sign']),
+    );
     return crypto.subtle.sign('HMAC', handle, toBufferSource(signingInput));
   });
 
@@ -68,6 +73,7 @@ export async function verifyHmac(
   key: Uint8Array,
   signingInput: Uint8Array,
   signature: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<boolean>> {
   const parameters = HMAC_ALGORITHMS[algorithm];
   if (parameters === undefined) {
@@ -79,7 +85,7 @@ export async function verifyHmac(
     return backendOk(false);
   }
 
-  const expected = await computeHmac(algorithm, key, signingInput);
+  const expected = await computeHmac(algorithm, key, signingInput, handleToken);
   if (!expected.ok) {
     return expected;
   }

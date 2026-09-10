@@ -1,0 +1,56 @@
+name: Bug report
+description: Report incorrect behavior, an interoperability defect, or a specification discrepancy
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report a suspected vulnerability in a public issue. Follow the [security policy](https://github.com/josesuite/node/security/policy) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Include the error category, trust stage, or message if available.
+      placeholder: |
+        verifyCompact() rejected a valid ES256 JWS with incompatible_key at the key_resolution stage.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      placeholder: Verification succeeds, or rejection with a different category.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: |
+        Provide the smallest code sample, token, or fixture that shows the problem. Use test keys only.
+        Redact or omit anything you cannot share; describe the shape of the input instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version and runtime
+      placeholder: '@josesuite/node 1.0.0, Node.js 24.11.0'
+    validations:
+      required: true
+
+  - type: textarea
+    id: standards
+    attributes:
+      label: Standards or conformance reference
+      description: |
+        For discrepancy reports, include the requirement ID, RFC section, fixture ID,
+        or other implementation you compared against.
+      placeholder: |
+        ALG-04, RFC 7515 §5.2, fixture F-ALG-02, or another JOSE Suite implementation accepts the same token.
+
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else?

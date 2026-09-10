@@ -1,0 +1,35 @@
+name: Feature or change request
+description: Propose a new capability or a change to existing behavior
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What you are trying to do and where the current API or behavior falls short.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: The API, behavior, or policy change you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: standards
+    attributes:
+      label: Standards or specification reference
+      description: |
+        Include references if this changes cryptographic behavior, token acceptance, parsing,
+        serialization, key handling, validation, algorithms, error semantics, or interoperability.
+        Registration in an IANA registry does not by itself make an algorithm or profile eligible;
+        enablement is a separate policy decision.
+      placeholder: RFC 8037 §3.1, requirement ALG-05, or the profile this would fall under.
+
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else?
+      description: Workarounds you are using, or prior discussion.

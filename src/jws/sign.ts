@@ -13,7 +13,7 @@
 import { signWithKey } from '../algorithms/index.ts';
 import type { ErrorCategory, TrustStage } from '../errors/codes.ts';
 import { encodeBase64url } from '../internal/encoding/base64url.ts';
-import { encodeUtf8 } from '../internal/encoding/utf8.ts';
+import { FATAL_DECODER, encodeUtf8 } from '../internal/encoding/utf8.ts';
 import { checkSuppliedParameterType } from '../internal/headers/critical.ts';
 import type { UsableKey } from '../key/import.ts';
 import { type AlgorithmPolicy, decideAlgorithm } from '../policy/algorithms.ts';
@@ -94,7 +94,10 @@ export async function signCompact(payload: Uint8Array, options: SignOptions): Pr
   }
   const protectedComponent = headerResult.component;
 
-  const payloadComponent = unencoded ? new TextDecoder().decode(payload) : encodeBase64url(payload);
+  // An unencoded payload has already been restricted to printable ASCII, so it
+  // decodes identically under either strictness; the fatal decoder is used
+  // because nothing here should ever substitute a replacement character.
+  const payloadComponent = unencoded ? FATAL_DECODER.decode(payload) : encodeBase64url(payload);
 
   const signingInput = unencoded
     ? buildSigningInput(protectedComponent, { octets: payload })

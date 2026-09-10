@@ -18,7 +18,7 @@ import { createPrivateKey, createPublicKey, sign as nodeSign, verify as nodeVeri
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { attempt, attemptVerify, base64url, importJwk } from '../../internal/crypto/webcrypto.ts';
+import { attempt, attemptVerify, base64url, importCached, importJwk } from '../../internal/crypto/webcrypto.ts';
 
 interface EcdsaParameters {
   readonly hash: string;
@@ -57,6 +57,7 @@ export async function signEcdsa(
   algorithm: string,
   privateJwk: { crv: string; x: Uint8Array; y: Uint8Array; d: Uint8Array },
   signingInput: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<Uint8Array>> {
   const parameters = ECDSA_ALGORITHMS[algorithm];
   if (parameters === undefined) {
@@ -69,18 +70,12 @@ export async function signEcdsa(
     return backendError('operation_failed');
   }
 
-  const jwk = {
-    kty: 'EC',
-    crv: privateJwk.crv,
-    x: base64url(privateJwk.x),
-    y: base64url(privateJwk.y),
-    d: base64url(privateJwk.d),
-  };
-
   const signature = parameters.nativeOnly
-    ? signNative(parameters, jwk, signingInput)
+    ? signNative(parameters, ecPrivateJwk(privateJwk), signingInput)
     : await attempt(async () => {
-        const key = await importJwk(jwk, { name: 'ECDSA', namedCurve: parameters.curve }, ['sign']);
+        const key = await importCached(handleToken, () =>
+          importJwk(ecPrivateJwk(privateJwk), { name: 'ECDSA', namedCurve: parameters.curve }, ['sign']),
+        );
         return crypto.subtle.sign({ name: 'ECDSA', hash: parameters.hash }, key, toBufferSource(signingInput));
       });
 
@@ -97,11 +92,32 @@ export async function signEcdsa(
   return backendOk(bytes);
 }
 
+/**
+ * Builds the JWK members for an import.
+ *
+ * Kept as functions so the Base64url of each coordinate is produced only on the
+ * call that actually imports, which a cached handle skips entirely.
+ */
+function ecPrivateJwk(material: { crv: string; x: Uint8Array; y: Uint8Array; d: Uint8Array }): Record<string, string> {
+  return {
+    kty: 'EC',
+    crv: material.crv,
+    x: base64url(material.x),
+    y: base64url(material.y),
+    d: base64url(material.d),
+  };
+}
+
+function ecPublicJwk(material: { crv: string; x: Uint8Array; y: Uint8Array }): Record<string, string> {
+  return { kty: 'EC', crv: material.crv, x: base64url(material.x), y: base64url(material.y) };
+}
+
 export async function verifyEcdsa(
   algorithm: string,
   publicJwk: { crv: string; x: Uint8Array; y: Uint8Array },
   signingInput: Uint8Array,
   signature: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<boolean>> {
   const parameters = ECDSA_ALGORITHMS[algorithm];
   if (parameters === undefined) {
@@ -124,16 +140,18 @@ export async function verifyEcdsa(
     return backendOk(false);
   }
 
-  const jwk = { kty: 'EC', crv: publicJwk.crv, x: base64url(publicJwk.x), y: base64url(publicJwk.y) };
-
   if (parameters.nativeOnly) {
-    return verifyNative(parameters, jwk, signingInput, signature);
+    return verifyNative(parameters, ecPublicJwk(publicJwk), signingInput, signature);
   }
 
   // Importing the key is an operational step, not a cryptographic outcome: a
   // rejection here means the key or the provider is unusable, which must not be
   // reported as a signature that did not verify.
-  const key = await attempt(() => importJwk(jwk, { name: 'ECDSA', namedCurve: parameters.curve }, ['verify']));
+  const key = await attempt(() =>
+    importCached(handleToken, () =>
+      importJwk(ecPublicJwk(publicJwk), { name: 'ECDSA', namedCurve: parameters.curve }, ['verify']),
+    ),
+  );
   if (!key.ok) {
     return key;
   }

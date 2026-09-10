@@ -21,7 +21,7 @@ import { createPrivateKey, createPublicKey, sign as nodeSign, verify as nodeVeri
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { attempt, attemptVerify, base64url, importJwk } from '../../internal/crypto/webcrypto.ts';
+import { attempt, attemptVerify, base64url, importCached, importJwk } from '../../internal/crypto/webcrypto.ts';
 
 interface EddsaParameters {
   readonly curve: string;
@@ -50,22 +50,35 @@ export function eddsaParameters(algorithm: string, legacyBoundCurve?: string): E
   return EDDSA_CURVES[algorithm];
 }
 
+/**
+ * Builds the JWK members for an import.
+ *
+ * Kept as functions so the Base64url of the key octets is produced only on the
+ * call that actually imports, which a cached handle skips entirely.
+ */
+function okpPrivateJwk(
+  parameters: EddsaParameters,
+  material: { x: Uint8Array; d: Uint8Array },
+): Record<string, string> {
+  return { kty: 'OKP', crv: parameters.curve, x: base64url(material.x), d: base64url(material.d) };
+}
+
+function okpPublicJwk(parameters: EddsaParameters, material: { x: Uint8Array }): Record<string, string> {
+  return { kty: 'OKP', crv: parameters.curve, x: base64url(material.x) };
+}
+
 export async function signEddsa(
   parameters: EddsaParameters,
   privateJwk: { x: Uint8Array; d: Uint8Array },
   signingInput: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<Uint8Array>> {
-  const jwk = {
-    kty: 'OKP',
-    crv: parameters.curve,
-    x: base64url(privateJwk.x),
-    d: base64url(privateJwk.d),
-  };
-
   const signature = parameters.nativeOnly
-    ? signNative(jwk, signingInput)
+    ? signNative(okpPrivateJwk(parameters, privateJwk), signingInput)
     : await attempt(async () => {
-        const key = await importJwk(jwk, parameters.curve, ['sign']);
+        const key = await importCached(handleToken, () =>
+          importJwk(okpPrivateJwk(parameters, privateJwk), parameters.curve, ['sign']),
+        );
         return crypto.subtle.sign(parameters.curve, key, toBufferSource(signingInput));
       });
 
@@ -86,6 +99,7 @@ export async function verifyEddsa(
   publicJwk: { x: Uint8Array },
   signingInput: Uint8Array,
   signature: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<boolean>> {
   // Length is public and fixed, so a wrong-length signature is rejected before
   // the key is even constructed.
@@ -93,13 +107,13 @@ export async function verifyEddsa(
     return backendOk(false);
   }
 
-  const jwk = { kty: 'OKP', crv: parameters.curve, x: base64url(publicJwk.x) };
-
   if (parameters.nativeOnly) {
-    return verifyNative(jwk, signingInput, signature);
+    return verifyNative(okpPublicJwk(parameters, publicJwk), signingInput, signature);
   }
 
-  const imported = await attempt(() => importJwk(jwk, parameters.curve, ['verify']));
+  const imported = await attempt(() =>
+    importCached(handleToken, () => importJwk(okpPublicJwk(parameters, publicJwk), parameters.curve, ['verify'])),
+  );
   return imported.ok
     ? attemptVerify(() =>
         crypto.subtle.verify(parameters.curve, imported.value, toBufferSource(signature), toBufferSource(signingInput)),

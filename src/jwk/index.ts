@@ -8,3 +8,10 @@ export { computeThumbprint, parseThumbprintUri, toThumbprintUri } from './thumbp
 export type { ThumbprintResult } from './thumbprint.ts';
 export { importKeyBytes } from '../key/import.ts';
 export type { ImportOptions, ImportResult, UsableKey } from '../key/import.ts';
+export { generateKeyPair, generateSecret } from '../key/generate.ts';
+export type {
+  GeneratedKeyPair,
+  GenerateKeyOptions,
+  GenerateKeyPairResult,
+  GenerateSecretResult,
+} from '../key/generate.ts';
