@@ -1038,3 +1038,143 @@ describe('JWT profile configuration', () => {
   });
 });
 
+describe('JWT creation binding and claim serialization', () => {
+  function create(fixture: ReturnType<typeof profile>, overrides: Record<string, unknown> = {}) {
+    return createJwt({
+      profile: fixture.profile,
+      limits: LIMITS_V1,
+      claims: CLAIMS,
+      signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: fixture.signing },
+      ...overrides,
+    } as Parameters<typeof createJwt>[0]);
+  }
+
+  test('rejects a profile that was not built by createJwtProfile', async () => {
+    const fixture = profile('project-jwt-v1');
+    const result = await create(fixture, { profile: { ...fixture.profile } });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'invalid_jwt_profile');
+    }
+  });
+
+  test('rejects a signing key that the profile would not verify with', async () => {
+    const fixture = profile('project-jwt-v1');
+    // A different key pair of the same algorithm: the binding is on key
+    // identity, not merely on the algorithm agreeing.
+    const other = keys();
+    const result = await create(fixture, {
+      signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: other.signing },
+    });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'signing_key_not_bound_to_profile');
+    }
+  });
+
+  test('rejects a chain that disagrees with the presence of encryption options', async () => {
+    const fixture = profile('project-jwt-v1');
+    const encryption = encryptionKeys();
+    const result = await create(fixture, {
+      encryption: {
+        keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'create'),
+        contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'create'),
+        contentAlgorithm: 'A128GCM',
+        recipients: [{ principalId: 'recipient', key: encryption.encryption }],
+        nonces: allocator(),
+      },
+    });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'creation_chain_mismatch');
+    }
+  });
+
+  test('rejects claims that have no faithful JSON serialization', async () => {
+    const fixture = profile('project-jwt-v1');
+
+    // Each of these would be dropped or silently coerced by `JSON.stringify`,
+    // producing a token whose claims differ from what the caller supplied.
+    const unserializable: unknown[] = [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      -1n,
+      9_007_199_254_740_992n,
+      undefined,
+      () => 1,
+      Symbol('claim'),
+    ];
+
+    for (const value of unserializable) {
+      const result = await create(fixture, { claims: { ...CLAIMS, extra: value } });
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.reason, 'claims_not_json_serializable');
+      }
+    }
+  });
+
+  test('serializes nested claims deterministically regardless of key order', async () => {
+    const fixture = profile('project-jwt-v1');
+    const extra = { list: [1, 'two', true, null], nested: { b: 2n, a: 'x' } };
+
+    const first = await create(fixture, { claims: { ...CLAIMS, extra } });
+    const second = await create(fixture, {
+      claims: { ...CLAIMS, extra: { nested: { a: 'x', b: 2n }, list: [1, 'two', true, null] } },
+    });
+
+    assert.strictEqual(first.ok, true);
+    assert.strictEqual(second.ok, true);
+    if (first.ok && second.ok) {
+      // Only the payload segment is compared: ECDSA signatures are randomized,
+      // so equal claim bytes do not imply equal tokens.
+      assert.strictEqual(first.token.split('.')[1], second.token.split('.')[1]);
+    }
+  });
+
+  test('reports a clock that throws separately from one that returns an invalid value', async () => {
+    const throwing = profile('project-jwt-v1', undefined, {
+      now: () => {
+        throw new Error('clock offline');
+      },
+    });
+    const result = await create(throwing);
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'backend_failure');
+      assert.strictEqual(result.reason, 'trusted_clock_unavailable');
+    }
+
+    const wrongType = profile('project-jwt-v1', undefined, { now: () => 1_000 as unknown as bigint });
+    const typeResult = await create(wrongType);
+    assert.strictEqual(typeResult.ok, false);
+    if (!typeResult.ok) {
+      assert.strictEqual(typeResult.reason, 'trusted_clock_invalid');
+    }
+  });
+
+  test('fails closed when the randomness source throws while minting a jti', async () => {
+    const store: ReplayStore = { admit: () => Promise.resolve('admitted') };
+    const fixture = profile('project-single-use-jwt-v1', store);
+    const result = await createJwtWithRandom(
+      {
+        profile: fixture.profile,
+        limits: LIMITS_V1,
+        claims: CLAIMS,
+        signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: fixture.signing },
+      },
+      {
+        randomBytes: () => {
+          throw new Error('entropy unavailable');
+        },
+      },
+    );
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'backend_failure');
+      assert.strictEqual(result.reason, 'randomness_unavailable');
+    }
+  });
+});
+
