@@ -70,6 +70,34 @@ function reject(reason: string, category: ErrorCategory = 'malformed_input'): In
   return { ok: false, category, reason };
 }
 
+/**
+ * Projects a parsed header object into plain JSON values.
+ *
+ * A null-prototype record is used so that a member named `__proto__` or
+ * `constructor` stays ordinary data for the caller, matching how the parser
+ * already keeps it out of the prototype chain.
+ */
+function project(header: JsonObject, serialization: InspectSerialization): UnverifiedHeader {
+  const parameters: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const [name, value] of header.members) {
+    parameters[name] = toPlainJson(value);
+  }
+
+  return Object.freeze({
+    unverifiedParameters: Object.freeze(parameters),
+    unverifiedAlgorithm: readString(header, 'alg'),
+    unverifiedKeyId: readString(header, 'kid'),
+    // `enc` names a content algorithm only in an encrypted object. Reporting it
+    // for a JWS would describe a parameter that has no meaning there.
+    unverifiedContentAlgorithm: serialization === 'jwe-compact' ? readString(header, 'enc') : undefined,
+  });
+}
+
+function readString(header: JsonObject, name: string): string | undefined {
+  const member = header.members.get(name);
+  return member?.kind === 'string' ? member.value : undefined;
+}
+
 /** Converts a parsed JSON value to plain data, keeping numbers as lexemes. */
 function toPlainJson(value: JsonValue): unknown {
   switch (value.kind) {
