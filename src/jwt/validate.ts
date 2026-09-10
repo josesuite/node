@@ -1,5 +1,5 @@
 import type { ErrorCategory, TrustStage } from '../errors/codes.ts';
-import { utf8Length } from '../internal/encoding/utf8.ts';
+import { FATAL_DECODER, utf8Length } from '../internal/encoding/utf8.ts';
 import { normalizeMediaType } from '../internal/headers/media-type.ts';
 import { isProtected } from '../internal/headers/types.ts';
 import type { MergedHeader } from '../internal/headers/types.ts';
@@ -97,10 +97,9 @@ export async function validateJwt(token: string, options: ValidateJwtOptions): P
     }
     // Fatal decoding rejects malformed sequences instead of substituting
     // replacement characters, which would alter the token being verified.
-    const inner = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
     let innerToken: string;
     try {
-      innerToken = inner.decode(decrypted.plaintext);
+      innerToken = FATAL_DECODER.decode(decrypted.plaintext);
     } catch {
       return fail('nested_layer', 'invalid_encoding', 'inner_jwt_invalid_utf8');
     }
