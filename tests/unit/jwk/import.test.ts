@@ -6,9 +6,9 @@ import { inspect } from 'node:util';
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonObject } from '../../../src/internal/json/types.ts';
 import { signWithKey } from '../../../src/algorithms/index.ts';
-import { importKey } from '../../../src/key/import.ts';
+import { importKey, importKeyBytes } from '../../../src/key/import.ts';
 import { sameKeyMaterial } from '../../../src/key/identity.ts';
-import { LIMITS_V1 } from '../../../src/policy/limits.ts';
+import { LIMITS_V1, lowerLimits } from '../../../src/policy/limits.ts';
 import { availableCurves } from '../../helpers/runtime.ts';
 
 function object(value: Record<string, unknown>): JsonObject {
@@ -148,6 +148,39 @@ describe('importing each key type', () => {
 });
 
 describe('structural rejections', () => {
+  test('rejects invalid serialized JWK input before key validation', () => {
+    for (const [source, reason] of [
+      ['{', 'jwk_invalid_json'],
+      ['{"kty":"oct","k":"a","k":"b"}', 'jwk_invalid_json'],
+      ['[]', 'jwk_not_an_object'],
+    ] as const) {
+      const result = importKeyBytes(new TextEncoder().encode(source), HS_VERIFY);
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.reason, reason);
+      }
+    }
+
+    const oversized = importKeyBytes(
+      new TextEncoder().encode(JSON.stringify(octJwk())),
+      HS_VERIFY,
+      lowerLimits({ serializedJwk: 1 }),
+    );
+    assert.strictEqual(oversized.ok, false);
+    if (!oversized.ok) {
+      assert.strictEqual(oversized.reason, 'jwk_too_large');
+    }
+
+    const invalidLimits = importKeyBytes(new TextEncoder().encode(JSON.stringify(octJwk())), HS_VERIFY, {
+      ...LIMITS_V1,
+      serializedJwk: LIMITS_V1.serializedJwk + 1,
+    });
+    assert.strictEqual(invalidLimits.ok, false);
+    if (!invalidLimits.ok) {
+      assert.strictEqual(invalidLimits.category, 'policy_violation');
+    }
+  });
+
   test('requires a well-formed kty', () => {
     assert.strictEqual(importKey(object({ n: 'x', e: 'AQAB' }), RSA_SIGN).ok, false);
 

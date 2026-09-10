@@ -6,6 +6,7 @@ import { contentEncryptionShape } from '../../../src/algorithms/content-encrypti
 import { systemRandom } from '../../../src/internal/crypto/random.ts';
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonObject } from '../../../src/internal/json/types.ts';
+import { OperationBudget } from '../../../src/internal/validation/limits.ts';
 import { decryptJson, type TrustedRecipient } from '../../../src/jwe/decrypt.ts';
 import { encryptJson } from '../../../src/jwe/encrypt.ts';
 import { composeNonce, type NonceAllocator, type NonceResult } from '../../../src/jwe/nonce.ts';
@@ -76,6 +77,7 @@ async function decrypt(
     contentAlgorithms?: readonly string[];
     principalId?: string;
     limits?: typeof LIMITS_V1;
+    operationBudget?: OperationBudget;
   } = {},
 ) {
   const serialized = typeof source === 'string' ? source : JSON.stringify(source);
@@ -85,6 +87,7 @@ async function decrypt(
     recipients: trusted,
     principalId: overrides.principalId ?? trusted[0]?.principalId ?? 'alice',
     limits: overrides.limits ?? LIMITS_V1,
+    operationBudget: overrides.operationBudget,
   });
 }
 
@@ -153,6 +156,31 @@ function recipientsFor(pair: ReturnType<typeof symmetric>): readonly TrustedReci
 }
 
 describe('JSON JWE decryption entry point', () => {
+  test('honors shared layer, JSON-node, and cryptographic-attempt budgets', async () => {
+    const pair = symmetric('A256KW', 32, 'A128GCM');
+    const serialized = await encrypted(pair, 'A256KW', 'A128GCM');
+
+    const layers = new OperationBudget(LIMITS_V1);
+    assert.strictEqual(layers.consumeLayer(), true);
+    assert.strictEqual(layers.consumeLayer(), true);
+    assertFailure(await decrypt(serialized, recipientsFor(pair), { operationBudget: layers }), {
+      reason: 'too_many_cryptographic_layers',
+    });
+
+    const nodes = new OperationBudget(LIMITS_V1);
+    assert.strictEqual(nodes.consumeJsonNodes(LIMITS_V1.jsonNodes), true);
+    assertFailure(await decrypt(serialized, recipientsFor(pair), { operationBudget: nodes }), {
+      reason: 'json_node_budget_exceeded',
+    });
+
+    for (const cryptographicAttempts of [0, 1]) {
+      const result = await decrypt(serialized, recipientsFor(pair), {
+        limits: lowerLimits({ cryptographicAttempts }),
+      });
+      assertFailure(result, { reason: 'cryptographic_attempt_budget_exceeded' });
+    }
+  });
+
   test('rejects limits that were never lowered from the baseline', async () => {
     const pair = symmetric('A256KW', 32, 'A128GCM');
     const serialized = await encrypted(pair, 'A256KW', 'A128GCM');

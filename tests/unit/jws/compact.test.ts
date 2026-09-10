@@ -4,6 +4,7 @@ import { createHmac, generateKeyPairSync, randomBytes } from 'node:crypto';
 
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonObject } from '../../../src/internal/json/types.ts';
+import { OperationBudget } from '../../../src/internal/validation/limits.ts';
 import { importKey, type UsableKey } from '../../../src/key/import.ts';
 import { AlgorithmPolicy } from '../../../src/policy/algorithms.ts';
 import { LIMITS_V1, lowerLimits } from '../../../src/policy/limits.ts';
@@ -884,5 +885,15 @@ describe('compact verification failure paths', () => {
       limits: lowerLimits({ cryptographicAttempts: 0 }),
     });
     assertVerifyFailure(attempts, 'cryptographic_attempt_budget_exceeded', 'cryptographic');
+  });
+
+  test('honors a JSON-node budget shared with an enclosing operation', async () => {
+    const pair = ecPair();
+    const token = await signWith(pair.signing, 'ES256');
+    const operationBudget = new OperationBudget(LIMITS_V1);
+    assert.strictEqual(operationBudget.consumeJsonNodes(LIMITS_V1.jsonNodes), true);
+
+    const result = await verifyWith(token, pair.verification, 'ES256', { operationBudget });
+    assertVerifyFailure(result, 'json_node_budget_exceeded', 'syntax');
   });
 });
