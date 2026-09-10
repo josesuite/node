@@ -9,7 +9,7 @@ import { generateKeyPair, generateSecret } from '../../../src/key/generate.ts';
 import { signCompact } from '../../../src/jws/sign.ts';
 import { verifyCompact } from '../../../src/jws/verify.ts';
 import { AlgorithmPolicy } from '../../../src/policy/algorithms.ts';
-import { LIMITS_V1 } from '../../../src/policy/limits.ts';
+import { LIMITS_V1, lowerLimits } from '../../../src/policy/limits.ts';
 
 const PLAINTEXT = new TextEncoder().encode('generated key round trip');
 
@@ -230,5 +230,43 @@ describe('key generation: encryption families', () => {
     });
     assert.ok(decrypted.ok);
     assert.deepStrictEqual(decrypted.plaintext, PLAINTEXT);
+  });
+});
+
+describe('key generation: RSA-02 parameters', () => {
+  test('defaults to the modern modulus floor with exponent 65537', async () => {
+    const generated = await generateKeyPair({ algorithm: 'RS256' });
+    assert.ok(generated.ok);
+
+    const material = generated.keys.publicKey.material as { modulusBits: number; e: Uint8Array };
+    assert.strictEqual(material.modulusBits, 3072);
+    // 65,537 is 0x010001.
+    assert.deepStrictEqual([...material.e], [0x01, 0x00, 0x01]);
+  });
+
+  test('refuses a modulus below the modern floor', async () => {
+    for (const modulusBits of [2048, 3071, 1024, 0]) {
+      const generated = await generateKeyPair({ algorithm: 'RS256', modulusBits });
+      assert.strictEqual(generated.ok, false, String(modulusBits));
+      assert.strictEqual(generated.category, 'policy_violation');
+      assert.strictEqual(generated.reason, 'modulus_below_modern_floor');
+    }
+  });
+
+  test('refuses a non-integer modulus size', async () => {
+    const generated = await generateKeyPair({ algorithm: 'RS256', modulusBits: 3072.5 });
+    assert.strictEqual(generated.ok, false);
+    assert.strictEqual(generated.reason, 'modulus_below_modern_floor');
+  });
+
+  test('refuses a modulus above the resource limit', async () => {
+    const generated = await generateKeyPair({
+      algorithm: 'RS256',
+      modulusBits: 4096,
+      limits: lowerLimits({ rsaModulusBits: 3072 }),
+    });
+    assert.strictEqual(generated.ok, false);
+    assert.strictEqual(generated.category, 'resource_limit');
+    assert.strictEqual(generated.reason, 'modulus_too_large');
   });
 });
