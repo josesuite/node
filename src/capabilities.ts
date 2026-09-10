@@ -100,8 +100,8 @@ export function getCapabilityReport(limits: Limits = LIMITS_V1): CapabilityRepor
     profiles: Object.freeze(['project-jwt-v1', 'project-single-use-jwt-v1', 'oauth-at-jwt-v1']),
     backend: Object.freeze({
       name: 'webcrypto+node:crypto',
-      // secp256k1 ECDSA and the AES-KW paths use the native module because
-      // WebCrypto does not offer them on every supported runtime.
+      // secp256k1 ECDSA, X448, and public-value derivation use the native
+      // module because WebCrypto does not offer them on every supported runtime.
       providers: Object.freeze(['WebCrypto', 'node:crypto']),
       restrictions: Object.freeze([
         'Managed-memory secret zeroization is best effort',
