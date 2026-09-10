@@ -65,6 +65,54 @@ export async function importRaw(
   return crypto.subtle.importKey('raw', toBufferSource(bytes), algorithm, false, usages as KeyUsage[]);
 }
 
+const HANDLE_CACHE = new WeakMap<object, Promise<CryptoKey>>();
+
+/**
+ * Memoizes the provider handle for a long-lived key record.
+ *
+ * Importing a key is a substantial share of the cost of an operation: for EC and
+ * RSA verification the import is comparable to the signature arithmetic itself,
+ * and it is repeated for every object processed under the same configured key.
+ *
+ * The cache is keyed on the identity of the record rather than on its contents,
+ * so no key material is hashed, compared, or retained as a lookup key. The
+ * entries are weak, so a handle lives exactly as long as the record a caller
+ * still holds. An absent token means the caller has no such record, and the
+ * import is simply not reused.
+ *
+ * Soundness depends on a record being bound to one algorithm and one operation
+ * for its whole lifetime, which is what makes a single handle per record the
+ * correct handle: there is no second interpretation of the same record for a
+ * cached handle to be wrongly reused under. A record whose binding could be
+ * widened later must not be used as a token here.
+ *
+ * The pending promise is cached rather than the resolved handle, so concurrent
+ * operations on one key share a single import instead of racing to perform
+ * several. A rejected import is evicted, because a transient provider fault must
+ * not become a permanently cached failure.
+ */
+export function importCached(token: object | undefined, load: () => Promise<CryptoKey>): Promise<CryptoKey> {
+  if (token === undefined) {
+    return load();
+  }
+
+  const cached = HANDLE_CACHE.get(token);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const pending = load();
+  HANDLE_CACHE.set(token, pending);
+  // Eviction is attached without awaiting, so the caller still receives the
+  // original promise and a rejection is not reported as an unhandled one here.
+  pending.catch(() => {
+    if (HANDLE_CACHE.get(token) === pending) {
+      HANDLE_CACHE.delete(token);
+    }
+  });
+  return pending;
+}
+
 /**
  * Imports a JWK.
  *
