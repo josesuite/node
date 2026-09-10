@@ -9,7 +9,7 @@ import { inspectUnverifiedHeader } from '../../src/inspect.ts';
 import { encryptCompact } from '../../src/jwe/compact.ts';
 import { signCompact } from '../../src/jws/sign.ts';
 import { verifyCompact } from '../../src/jws/verify.ts';
-import { LIMITS_V1 } from '../../src/policy/limits.ts';
+import { LIMITS_V1, lowerLimits } from '../../src/policy/limits.ts';
 
 const encoder = new TextEncoder();
 
@@ -165,5 +165,37 @@ describe('unverified header inspection', () => {
       assert.strictEqual(result.category, 'invalid_header');
       assert.strictEqual(result.reason, 'header_not_an_object');
     }
+  });
+
+  test('applies the configured input and header limits', () => {
+    const token = tokenWithHeader({ alg: 'ES256' });
+
+    const inputLimited = inspectUnverifiedHeader(token, {
+      serialization: 'jws-compact',
+      limits: lowerLimits({ joseInput: 4 }),
+    });
+    assert.strictEqual(inputLimited.ok, false);
+    assert.strictEqual(inputLimited.category, 'resource_limit');
+    assert.strictEqual(inputLimited.reason, 'input_too_large');
+
+    const headerLimited = inspectUnverifiedHeader(token, {
+      serialization: 'jws-compact',
+      limits: lowerLimits({ headerSource: 4 }),
+    });
+    assert.strictEqual(headerLimited.ok, false);
+    assert.strictEqual(headerLimited.category, 'resource_limit');
+    assert.strictEqual(headerLimited.reason, 'protected_header_too_large');
+  });
+
+  test('rejects limits that were never lowered from the baseline', () => {
+    const inflated = { ...LIMITS_V1, headerSource: LIMITS_V1.headerSource + 1 };
+
+    const result = inspectUnverifiedHeader(tokenWithHeader({ alg: 'ES256' }), {
+      serialization: 'jws-compact',
+      limits: inflated,
+    });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.category, 'policy_violation');
+    assert.strictEqual(result.reason, 'limit_headerSource_exceeds_baseline');
   });
 });
