@@ -14,7 +14,14 @@
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 
-/** Maps a character code to its 6-bit value, or -1 when outside the alphabet. */
+/**
+ * Maps an ASCII character code to its 6-bit value, or -1 when outside the
+ * alphabet.
+ *
+ * Deliberately covers only the ASCII range. A table spanning every UTF-16 code
+ * unit would let a lookup skip its range test, but 64 KiB of resident memory is
+ * a poor trade for that in a library, and the small table stays cache-resident.
+ */
 const DECODE_TABLE: Int8Array = (() => {
   const table = new Int8Array(128).fill(-1);
   for (let i = 0; i < ALPHABET.length; i += 1) {
@@ -22,6 +29,11 @@ const DECODE_TABLE: Int8Array = (() => {
   }
   return table;
 })();
+
+/** Resolves one character, treating anything outside ASCII as off-alphabet. */
+function sextet(code: number): number {
+  return code < 128 ? DECODE_TABLE[code]! : -1;
+}
 
 export type Base64urlFailure =
   /** A character outside the URL-safe alphabet, including `=` and whitespace. */
@@ -73,31 +85,58 @@ export function decodeBase64url(input: string, maxDecodedBytes: number): Base64u
   }
 
   const output = new Uint8Array(outputLength);
-  let outputIndex = 0;
-  let accumulator = 0;
-  let bitsHeld = 0;
 
-  for (let i = 0; i < length; i += 1) {
-    const code = input.charCodeAt(i);
-    const value = code < 128 ? DECODE_TABLE[code]! : -1;
-    if (value < 0) {
+  // Whole groups of four characters yield three octets each. Handling a group at
+  // a time keeps the alphabet check and the canonical-form check identical to a
+  // per-character walk while removing the per-octet shift bookkeeping.
+  const wholeGroups = length - (length % 4);
+  let outputIndex = 0;
+
+  for (let i = 0; i < wholeGroups; i += 4) {
+    const a = sextet(input.charCodeAt(i));
+    const b = sextet(input.charCodeAt(i + 1));
+    const c = sextet(input.charCodeAt(i + 2));
+    const d = sextet(input.charCodeAt(i + 3));
+
+    // One test covers all four, since any value outside the alphabet is negative
+    // and a bitwise or of the group keeps that sign bit.
+    if ((a | b | c | d) < 0) {
       return { ok: false, failure: 'alphabet' };
     }
 
-    accumulator = (accumulator << 6) | value;
-    bitsHeld += 6;
-
-    if (bitsHeld >= 8) {
-      bitsHeld -= 8;
-      output[outputIndex] = (accumulator >>> bitsHeld) & 0xff;
-      outputIndex += 1;
-    }
+    output[outputIndex] = (a << 2) | (b >> 4);
+    output[outputIndex + 1] = ((b & 0x0f) << 4) | (c >> 2);
+    output[outputIndex + 2] = ((c & 0x03) << 6) | d;
+    outputIndex += 3;
   }
 
-  // The trailing 2 or 4 bits of the final character are not part of any octet
-  // and MUST be zero; otherwise several distinct encodings decode alike.
-  if (bitsHeld > 0 && (accumulator & ((1 << bitsHeld) - 1)) !== 0) {
-    return { ok: false, failure: 'unused_bits' };
+  // A trailing group of two or three characters carries one or two octets. Its
+  // final character holds 4 or 2 bits belonging to no octet, which MUST be zero;
+  // otherwise several distinct encodings would decode alike.
+  const remaining = length - wholeGroups;
+  if (remaining !== 0) {
+    const a = sextet(input.charCodeAt(wholeGroups));
+    const b = sextet(input.charCodeAt(wholeGroups + 1));
+    if ((a | b) < 0) {
+      return { ok: false, failure: 'alphabet' };
+    }
+
+    if (remaining === 2) {
+      if ((b & 0x0f) !== 0) {
+        return { ok: false, failure: 'unused_bits' };
+      }
+      output[outputIndex] = (a << 2) | (b >> 4);
+    } else {
+      const c = sextet(input.charCodeAt(wholeGroups + 2));
+      if (c < 0) {
+        return { ok: false, failure: 'alphabet' };
+      }
+      if ((c & 0x03) !== 0) {
+        return { ok: false, failure: 'unused_bits' };
+      }
+      output[outputIndex] = (a << 2) | (b >> 4);
+      output[outputIndex + 1] = ((b & 0x0f) << 4) | (c >> 2);
+    }
   }
 
   return { ok: true, bytes: output };
