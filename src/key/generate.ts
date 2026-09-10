@@ -15,6 +15,9 @@
  * applied here rather than assumed.
  */
 
+import { contentEncryptionShape } from '../algorithms/content-encryption/index.ts';
+import { hmacOutputBytes } from '../algorithms/jws/hmac.ts';
+import { keyManagementShape } from '../algorithms/jwe/index.ts';
 import { isQualifiedAlgorithm, lookupAlgorithm } from '../algorithms/registry.ts';
 import type { ErrorCategory } from '../errors/codes.ts';
 import type { UsableKey } from './import.ts';
@@ -123,3 +126,49 @@ function checkCreationEligibility(algorithm: string): EligibilityFailure | undef
 
   return undefined;
 }
+
+type SizeResult = { readonly ok: true; readonly value: number } | EligibilityFailure;
+
+/** Resolves the exact secret size the requested algorithm fixes. */
+function secretBytes(options: GenerateKeyOptions): SizeResult {
+  const hmacBytes = hmacOutputBytes(options.algorithm);
+  if (hmacBytes !== undefined) {
+    return { ok: true, value: hmacBytes };
+  }
+
+  const shape = keyManagementShape(options.algorithm);
+  if (shape === undefined) {
+    return reject('algorithm_requires_a_key_pair_not_a_secret', 'incompatible_key');
+  }
+
+  if (shape.mode === 'direct') {
+    // `dir` uses the content algorithm's CEK directly, so its size is that
+    // algorithm's, and exactly one content algorithm may be bound.
+    const contentAlgorithms = options.contentAlgorithms;
+    if (contentAlgorithms === undefined || contentAlgorithms.length !== 1) {
+      return reject('direct_requires_one_content_algorithm');
+    }
+    const content = contentEncryptionShape(contentAlgorithms[0]!);
+    if (content === undefined) {
+      return reject('content_algorithm_unsupported', 'unsupported_algorithm');
+    }
+    return { ok: true, value: content.cekBytes };
+  }
+
+  const aesBytes = AES_KEY_BYTES[options.algorithm];
+  if (aesBytes !== undefined) {
+    return { ok: true, value: aesBytes };
+  }
+
+  return reject('algorithm_requires_a_key_pair_not_a_secret', 'incompatible_key');
+}
+
+/** AES key size in octets for each symmetric key-management identifier. */
+const AES_KEY_BYTES: Readonly<Record<string, number>> = Object.freeze({
+  A128KW: 16,
+  A192KW: 24,
+  A256KW: 32,
+  A128GCMKW: 16,
+  A192GCMKW: 24,
+  A256GCMKW: 32,
+});
