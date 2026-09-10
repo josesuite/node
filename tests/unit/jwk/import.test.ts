@@ -672,3 +672,40 @@ describe('EC material validation', () => {
   });
 });
 
+describe('RSA private CRT validation', () => {
+  /** Mutates one supplied key so overrides stay consistent with its own members. */
+  function importPrivate(jwk: Record<string, string>, overrides: Record<string, unknown>) {
+    return importKey(object({ ...jwk, ...overrides }), RSA_SIGN);
+  }
+
+  test('refuses multi-prime keys rather than ignoring the extra factors', async () => {
+    // Their presence changes the meaning of every other CRT parameter.
+    assertRejected(importPrivate(rsaJwk(), { oth: [] }), 'oth_unsupported');
+  });
+
+  test('rejects equal or degenerate prime factors', async () => {
+    const jwk = rsaJwk();
+    // Equal factors also break the product check, so the modulus is rebuilt as
+    // `p * p` to reach the equality test that precedes it.
+    const p = big(jwk, 'p');
+    assertRejected(importPrivate(jwk, { q: jwk['p'], n: uint(p * p) }), 'p_equals_q');
+
+    // A forged `p = 1` satisfies the product check on its own, and `p - 1` is
+    // used as a modulus below where a zero divisor would throw.
+    assertRejected(importPrivate(jwk, { p: uint(1n), q: jwk['n'] }), 'factor_not_greater_than_one');
+  });
+
+  test('rejects factors whose product is not the modulus', async () => {
+    const jwk = rsaJwk();
+    assertRejected(importPrivate(jwk, { p: uint(big(jwk, 'p') + 2n) }), 'pq_product_mismatch');
+  });
+
+  test('rejects CRT parameters inconsistent with the private exponent', async () => {
+    const jwk = rsaJwk();
+
+    assertRejected(importPrivate(jwk, { dp: uint(big(jwk, 'dp') + 1n) }), 'dp_mismatch');
+    assertRejected(importPrivate(jwk, { dq: uint(big(jwk, 'dq') + 1n) }), 'dq_mismatch');
+    assertRejected(importPrivate(jwk, { qi: uint(big(jwk, 'qi') + 1n) }), 'qi_mismatch');
+  });
+});
+
