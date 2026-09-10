@@ -591,3 +591,76 @@ describe('compression is disabled', () => {
     }
   });
 });
+
+/** Rewrites the protected header of a serialized object. */
+function withHeader(serialized: string, members: Record<string, unknown>): string {
+  const parsed = JSON.parse(serialized) as Record<string, unknown>;
+  const header = JSON.parse(Buffer.from(parsed['protected'] as string, 'base64url').toString('utf8')) as Record<
+    string,
+    unknown
+  >;
+  const merged: Record<string, unknown> = { ...header, ...members };
+  for (const [name, value] of Object.entries(members)) {
+    if (value === undefined) {
+      delete merged[name];
+    }
+  }
+  return JSON.stringify({
+    ...parsed,
+    protected: Buffer.from(JSON.stringify(merged)).toString('base64url'),
+  });
+}
+
+function assertHeaderFailure(result: Awaited<ReturnType<typeof decrypt>>, reason: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.stage, 'header');
+    assert.strictEqual(result.reason, reason);
+  }
+}
+
+describe('GCM key-wrap and PBES2 header validation', () => {
+  async function gcmKwObject() {
+    const pair = gcmKwPair('A256GCMKW', 32);
+    const result = await encryptJson(PLAINTEXT, {
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256GCMKW'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'create'),
+      contentAlgorithm: 'A128GCM',
+      recipients: [{ key: pair.encryption, keyIdentity: pair.keyIdentity }],
+      limits: LIMITS_V1,
+      random: systemRandom,
+      nonceAllocator: trackingAllocator(),
+    });
+    if (!result.ok) {
+      throw new Error(`encrypt failed: ${result.reason}`);
+    }
+    return { serialized: result.value, trusted: [{ principalId: 'a', key: pair.decryption }] };
+  }
+
+  test('requires both wrapping parameters to be present', async () => {
+    const { serialized, trusted } = await gcmKwObject();
+
+    for (const member of ['iv', 'tag'] as const) {
+      const result = await decrypt(withHeader(serialized, { [member]: undefined }), trusted, 'A256GCMKW');
+      assertHeaderFailure(result, 'gcmkw_parameters_missing');
+    }
+  });
+
+  test('requires both wrapping parameters to decode at their fixed widths', async () => {
+    const { serialized, trusted } = await gcmKwObject();
+
+    for (const member of ['iv', 'tag'] as const) {
+      const invalid = await decrypt(withHeader(serialized, { [member]: 'not base64url!' }), trusted, 'A256GCMKW');
+      assertHeaderFailure(invalid, 'gcmkw_parameters_invalid_base64url');
+
+      // Both widths are fixed by the construction, so a different width means
+      // the object does not describe the algorithm it names.
+      const short = await decrypt(
+        withHeader(serialized, { [member]: Buffer.alloc(4, 1).toString('base64url') }),
+        trusted,
+        'A256GCMKW',
+      );
+      assertHeaderFailure(short, 'gcmkw_parameters_wrong_length');
+    }
+  });
+});
