@@ -9,11 +9,18 @@
  * from what the caller believes was authenticated.
  */
 
+import { encodeUtf8 } from './utf8.ts';
+
 export type AsciiResult =
   | { readonly ok: true; readonly bytes: Uint8Array }
   | { readonly ok: false; readonly failure: 'non_ascii' };
 
 export function encodeAscii(input: string): AsciiResult {
+  // Native encoding pays off for longer components; the loop is faster for headers.
+  if (input.length >= 256) {
+    return /[\u0080-\uffff]/.test(input) ? { ok: false, failure: 'non_ascii' } : { ok: true, bytes: encodeUtf8(input) };
+  }
+
   const bytes = new Uint8Array(input.length);
 
   for (let i = 0; i < input.length; i += 1) {
