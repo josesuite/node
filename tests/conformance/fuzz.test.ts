@@ -26,7 +26,7 @@ describe('bounded parser fuzz regressions', () => {
   test('arbitrary bytes never escape the JSON or Base64url result boundary', () => {
     const next = generator(SEED);
     for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
-      const input = Uint8Array.from({ length: next() % 257 }, () => next() & 0xff);
+      const input = Uint8Array.from({ length: next() % 4097 }, () => next() & 0xff);
       const before = input.slice();
 
       const json = parseJson(input, LIMITS_V1);
@@ -70,7 +70,7 @@ describe('bounded parser fuzz regressions', () => {
   test('generated octets have one canonical Base64url encoding', () => {
     const next = generator(SEED ^ 0xb64);
     for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
-      const input = Uint8Array.from({ length: next() % 257 }, () => next() & 0xff);
+      const input = Uint8Array.from({ length: next() % 4097 }, () => next() & 0xff);
       const encoded = encodeBase64url(input);
       const decoded = decodeBase64url(encoded, LIMITS_V1.payload);
 
