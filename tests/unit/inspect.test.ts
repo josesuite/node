@@ -198,4 +198,53 @@ describe('unverified header inspection', () => {
     assert.strictEqual(result.category, 'policy_violation');
     assert.strictEqual(result.reason, 'limit_headerSource_exceeds_baseline');
   });
+
+  test('projects JSON values without rounding numbers or exposing the prototype', () => {
+    const result = inspectUnverifiedHeader(
+      tokenWithComponent(
+        encodeBase64url(
+          encoder.encode(
+            '{"alg":"ES256","big":18446744073709551617,"crit":["a"],"nested":{"b":true},"nil":null,"__proto__":"x"}',
+          ),
+        ),
+      ),
+      { serialization: 'jws-compact' },
+    );
+
+    assert.ok(result.ok);
+    const parameters = result.header.unverifiedParameters;
+    // Numbers keep their source lexeme, so a value beyond 2^53 survives intact.
+    assert.strictEqual(parameters['big'], '18446744073709551617');
+    assert.deepStrictEqual(parameters['crit'], ['a']);
+    assert.deepStrictEqual({ ...(parameters['nested'] as object) }, { b: true });
+    assert.strictEqual(parameters['nil'], null);
+    // A `__proto__` member stays ordinary data and never reaches the chain.
+    assert.strictEqual(parameters['__proto__'], 'x');
+    assert.strictEqual(Object.getPrototypeOf(parameters), null);
+  });
+
+  test('reports only string values for the named hints', () => {
+    const result = inspectUnverifiedHeader(
+      tokenWithComponent(encodeBase64url(encoder.encode('{"alg":3,"kid":["a"]}'))),
+      { serialization: 'jws-compact' },
+    );
+
+    assert.ok(result.ok);
+    // A non-string `alg` is not coerced into one; it remains available as a raw
+    // parameter but is never presented as an algorithm name.
+    assert.strictEqual(result.header.unverifiedAlgorithm, undefined);
+    assert.strictEqual(result.header.unverifiedKeyId, undefined);
+    assert.strictEqual(result.header.unverifiedParameters['alg'], '3');
+  });
+
+  test('returns a frozen result carrying no payload', () => {
+    const result = inspectUnverifiedHeader(tokenWithHeader({ alg: 'ES256' }), { serialization: 'jws-compact' });
+
+    assert.ok(result.ok);
+    assert.ok(Object.isFrozen(result.header));
+    assert.ok(Object.isFrozen(result.header.unverifiedParameters));
+    // The payload is deliberately absent: it is unauthenticated in a JWS and
+    // unreadable in a JWE.
+    assert.strictEqual('payload' in result.header, false);
+  });
 });
