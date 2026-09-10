@@ -4,6 +4,7 @@ import { generateKeyPairSync, randomBytes } from 'node:crypto';
 
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonObject } from '../../../src/internal/json/types.ts';
+import { OperationBudget } from '../../../src/internal/validation/limits.ts';
 import { importKey, type UsableKey } from '../../../src/key/import.ts';
 import { allRequiredSigners, namedSigner, thresholdOfSigners } from '../../../src/jws/aggregate.ts';
 import { signJson } from '../../../src/jws/sign-json.ts';
@@ -279,6 +280,26 @@ describe('failed entries do not erase successes', () => {
 });
 
 describe('whole-object rejection', () => {
+  test('rejects malformed protected headers before evaluating entries', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+
+    for (const [protectedHeader, reason] of [
+      ['not!base64url', 'protected_header_invalid_base64url'],
+      [Buffer.from('{not json').toString('base64url'), 'protected_header_malformed'],
+      [Buffer.from('[]').toString('base64url'), 'header_not_an_object'],
+    ]) {
+      const parsed = JSON.parse(serialized);
+      parsed.signatures[0].protected = protectedHeader;
+      const result = await verify(JSON.stringify(parsed), trust(alice), namedSigner('alice'));
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.reason, reason);
+        assert.deepStrictEqual(result.entries, []);
+      }
+    }
+  });
+
   test('a prohibited algorithm in any entry rejects the object', async () => {
     const alice = ecSigner('alice');
     const serialized = await sign([alice], ['ES256']);
@@ -401,6 +422,48 @@ describe('whole-object rejection', () => {
 });
 
 describe('key resolution', () => {
+  test('reports missing, unprotected, and unsupported algorithms per entry', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+
+    for (const rewrite of [
+      { protected: { kid: 'alice' } },
+      { protected: { kid: 'alice' }, header: { alg: 'ES256' } },
+      { protected: { alg: 'ES384', kid: 'alice' } },
+    ]) {
+      const parsed = JSON.parse(serialized);
+      parsed.signatures[0].protected = Buffer.from(JSON.stringify(rewrite.protected)).toString('base64url');
+      if (rewrite.header !== undefined) {
+        parsed.signatures[0].header = rewrite.header;
+      }
+
+      const result = await verify(JSON.stringify(parsed), trust(alice), namedSigner('alice'));
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.entries.length, 1);
+        assert.strictEqual(result.entries[0]!.stage, 'header');
+      }
+    }
+  });
+
+  test('rejects an invalid inline unencoded payload before key resolution', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+    const parsed = JSON.parse(serialized);
+    parsed.payload = '\u001f';
+    parsed.signatures[0].protected = Buffer.from(
+      JSON.stringify({ alg: 'ES256', b64: false, crit: ['b64'], kid: 'alice' }),
+    ).toString('base64url');
+
+    const result = await verify(JSON.stringify(parsed), trust(alice), namedSigner('alice'), ['ES256'], {
+      unencodedPayload: true,
+    });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.entries[0]!.reason, 'payload_character_not_permitted');
+    }
+  });
+
   test('reports an entry with no eligible key without failing the object', async () => {
     const alice = ecSigner('alice');
     const bob = ecSigner('bob');
@@ -828,6 +891,19 @@ describe('key resolution requires exactly one eligible key', () => {
 });
 
 describe('resource limits reach the whole operation', () => {
+  test('honors a JSON-node budget shared with an enclosing operation', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+    const operationBudget = new OperationBudget(LIMITS_V1);
+    assert.strictEqual(operationBudget.consumeJsonNodes(LIMITS_V1.jsonNodes), true);
+
+    const result = await verify(serialized, trust(alice), namedSigner('alice'), ['ES256'], { operationBudget });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'json_node_budget_exceeded');
+    }
+  });
+
   test('accounts cryptographic attempts without a caller-supplied budget', async () => {
     // A standalone operation owns its budget. Accounting only when an enclosing
     // caller passes one in would leave every direct call unbounded.
