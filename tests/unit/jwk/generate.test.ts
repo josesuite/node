@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
+import { systemRandom } from '../../../src/internal/crypto/random.ts';
+import { decryptCompact, encryptCompact } from '../../../src/jwe/compact.ts';
 import { generateKeyPair, generateSecret } from '../../../src/key/generate.ts';
 import { signCompact } from '../../../src/jws/sign.ts';
 import { verifyCompact } from '../../../src/jws/verify.ts';
@@ -106,5 +108,61 @@ describe('key generation: signature families', () => {
       principalId: 'signer',
     });
     assert.strictEqual(wrong.ok, false);
+  });
+});
+
+describe('key generation: encryption families', () => {
+  test('generates an RSA pair usable for RSA-OAEP-256 key transport', async () => {
+    const generated = await generateKeyPair({
+      algorithm: 'RSA-OAEP-256',
+      contentAlgorithms: ['A128CBC-HS256'],
+    });
+    assert.ok(generated.ok);
+
+    const { privateKey, publicKey } = generated.keys;
+    assert.strictEqual(publicKey.operation, 'wrapKey');
+    assert.strictEqual(privateKey.operation, 'unwrapKey');
+    assert.deepStrictEqual([...publicKey.contentAlgorithms], ['A128CBC-HS256']);
+
+    const encrypted = await encryptCompact(PLAINTEXT, {
+      recipients: [{ key: publicKey }],
+      contentAlgorithm: 'A128CBC-HS256',
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['RSA-OAEP-256'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128CBC-HS256'], 'create'),
+      limits: LIMITS_V1,
+      random: systemRandom,
+    });
+    assert.ok(encrypted.ok);
+
+    const decrypted = await decryptCompact(encrypted.token, {
+      recipients: [{ principalId: 'recipient', key: privateKey }],
+      principalId: 'recipient',
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['RSA-OAEP-256'], 'receive'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128CBC-HS256'], 'receive'),
+      limits: LIMITS_V1,
+    });
+    assert.ok(decrypted.ok);
+    assert.deepStrictEqual(decrypted.plaintext, PLAINTEXT);
+  });
+
+  test('generates an agreement pair on the configured curve', async () => {
+    for (const algorithm of ['ECDH-ES', 'ECDH-ES+A128KW'] as const) {
+      const generated = await generateKeyPair({
+        algorithm,
+        curve: 'P-384',
+        contentAlgorithms: ['A128GCM'],
+      });
+      assert.ok(generated.ok, algorithm);
+
+      // Both halves derive: agreement has no separate wrap and unwrap roles at
+      // the key level.
+      assert.strictEqual(generated.keys.privateKey.operation, 'deriveKey');
+      assert.strictEqual(generated.keys.publicKey.operation, 'deriveKey');
+      assert.strictEqual(generated.keys.privateKey.identity.kty, 'EC');
+      assert.strictEqual(
+        generated.keys.privateKey.identity.kty === 'EC' ? generated.keys.privateKey.identity.crv : undefined,
+        'P-384',
+      );
+    }
   });
 });
