@@ -23,6 +23,8 @@ import { hmacOutputBytes } from '../algorithms/jws/hmac.ts';
 import { keyManagementShape } from '../algorithms/jwe/index.ts';
 import { isQualifiedAlgorithm, lookupAlgorithm } from '../algorithms/registry.ts';
 import type { ErrorCategory } from '../errors/codes.ts';
+import { encodeBase64url } from '../internal/encoding/base64url.ts';
+import { systemRandom } from '../internal/crypto/random.ts';
 import { type ImportResult, importKeyBytes, type UsableKey } from './import.ts';
 import type { EcCurve, KeyOperation } from './types.ts';
 import { type Limits, LIMITS_V1 } from '../policy/limits.ts';
@@ -99,6 +101,46 @@ const KEY_PAIR_OPERATIONS: Readonly<Record<string, readonly [KeyOperation, KeyOp
   direct_agreement: ['deriveKey', 'deriveKey'],
   agreement_with_wrapping: ['deriveKey', 'deriveKey'],
 });
+
+/**
+ * Generates a symmetric secret bound to one algorithm.
+ *
+ * The size comes from the algorithm: the hash output length for HMAC, the AES
+ * key size for the wrapping families, and the content algorithm's CEK size for
+ * `dir`. A caller-supplied size is deliberately not accepted, because the only
+ * sizes these algorithms admit are the ones they fix.
+ */
+export function generateSecret(options: GenerateKeyOptions): GenerateSecretResult {
+  const limits = options.limits ?? LIMITS_V1;
+  const eligibility = checkCreationEligibility(options.algorithm);
+  if (eligibility !== undefined) {
+    return eligibility;
+  }
+
+  const size = secretBytes(options);
+  if (!size.ok) {
+    return size;
+  }
+
+  const bytes = systemRandom.randomBytes(size.value);
+  if (!bytes.ok) {
+    // A generator failure must never fall back to a weaker source.
+    return reject('random_source_unavailable', 'backend_failure');
+  }
+
+  const shape = keyManagementShape(options.algorithm);
+  const operation: KeyOperation = shape === undefined ? 'sign' : shape.mode === 'direct' ? 'encrypt' : 'wrapKey';
+
+  return admit(
+    { kty: 'oct', k: encodeBase64url(bytes.value) },
+    {
+      algorithm: options.algorithm,
+      operation,
+      contentAlgorithms: options.contentAlgorithms,
+      limits,
+    },
+  );
+}
 
 type EligibilityFailure = { readonly ok: false; readonly category: ErrorCategory; readonly reason: string };
 
