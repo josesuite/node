@@ -1178,3 +1178,216 @@ describe('JWT creation binding and claim serialization', () => {
   });
 });
 
+function assertReason(result: Awaited<ReturnType<typeof validateJwt>>, reason: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.reason, reason);
+  }
+}
+
+describe('JWT claim semantics', () => {
+  async function validated(fixture: ReturnType<typeof profile>, claims: Record<string, unknown>) {
+    return validateJwt(await signed(fixture, JSON.stringify(claims)), {
+      profile: fixture.profile,
+      limits: LIMITS_V1,
+    });
+  }
+
+  test('rejects present-but-malformed string claims rather than treating them as absent', async () => {
+    const fixture = profile('project-jwt-v1');
+
+    for (const name of ['iss', 'sub', 'jti'] as const) {
+      for (const value of ['', 1, null, true, [], {}]) {
+        assertReason(await validated(fixture, { ...CLAIMS, [name]: value }), `${name}_invalid`);
+      }
+    }
+  });
+
+  test('rejects present-but-malformed temporal claims', async () => {
+    const fixture = profile('project-jwt-v1');
+
+    for (const name of ['exp', 'nbf', 'iat'] as const) {
+      for (const value of ['900', null, true, [], {}, -1]) {
+        assertReason(await validated(fixture, { ...CLAIMS, [name]: value }), `${name}_invalid`);
+      }
+    }
+  });
+
+  test('enforces identifier and jti size limits at the claims stage', async () => {
+    const fixture = profile('project-jwt-v1');
+    const long = `https://issuer.example/${'a'.repeat(LIMITS_V1.identifier)}`;
+
+    for (const claims of [{ iss: long }, { sub: long }, { aud: long }]) {
+      const result = await validated(fixture, { ...CLAIMS, ...claims });
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.category, 'resource_limit');
+        assert.strictEqual(result.reason, 'identifier_too_long');
+      }
+    }
+
+    // The cap applies even though `jti` is optional for this profile.
+    const oversizedJti = await validated(fixture, { ...CLAIMS, jti: 'j'.repeat(LIMITS_V1.jti + 1) });
+    assert.strictEqual(oversizedJti.ok, false);
+    if (!oversizedJti.ok) {
+      assert.strictEqual(oversizedJti.category, 'resource_limit');
+      assert.strictEqual(oversizedJti.reason, 'jti_too_long');
+    }
+  });
+
+  test('reports a subject validator that throws as a backend failure, not a rejection', async () => {
+    const pair = keys();
+    const result = createJwtProfile({
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWS -> claims',
+      clock: { now: () => 1_000n },
+      subject: () => {
+        throw new Error('directory unavailable');
+      },
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: pair.verification,
+        principalId: 'https://issuer.example',
+      },
+    });
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+
+    const fixture = { profile: result.profile, signing: pair.signing };
+    const validation = await validated(fixture, CLAIMS);
+    assert.strictEqual(validation.ok, false);
+    if (!validation.ok) {
+      assert.strictEqual(validation.category, 'backend_failure');
+      assert.strictEqual(validation.stage, 'context_admission');
+      assert.strictEqual(validation.reason, 'subject_validator_failed');
+    }
+  });
+
+  test('rejects a validity window that never opens', async () => {
+    // Skew is what separates this from `token_not_yet_valid`: it must be wide
+    // enough for `nbf` to pass the not-yet-valid check while still landing at or
+    // after `exp`, which describes a token usable at no instant.
+    const pair = keys();
+    const created = createJwtProfile({
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWS -> claims',
+      clock: { now: () => 1_000n },
+      skew: 300,
+      subject: () => true,
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: pair.verification,
+        principalId: 'https://issuer.example',
+      },
+    });
+    assert.strictEqual(created.ok, true);
+    if (!created.ok) {
+      return;
+    }
+
+    const fixture = { profile: created.profile, signing: pair.signing };
+    assertReason(await validated(fixture, { ...CLAIMS, nbf: 1_100, exp: 1_100 }), 'nbf_not_before_exp');
+  });
+
+  test('rejects an issuance time in the future', async () => {
+    const fixture = profile('project-jwt-v1');
+    assertReason(await validated(fixture, { ...CLAIMS, iat: 1_001 }), 'iat_invalid');
+  });
+
+  test('caps the claimed lifetime and the token age independently of expiry', async () => {
+    const fixture = profile('project-jwt-v1');
+    // Unexpired at `now`, but the issuer claims a lifetime beyond the profile cap.
+    assertReason(await validated(fixture, { ...CLAIMS, iat: 900, exp: 900 + 3_601 }), 'lifetime_invalid');
+
+    // Within the claimed lifetime, but minted far enough in the past that the
+    // token's actual age exceeds the cap.
+    const old = profile('project-jwt-v1', undefined, { now: () => 10_000n });
+    assertReason(await validated(old, { ...CLAIMS, iat: 1, exp: 20_000 }), 'lifetime_invalid');
+  });
+
+  test('requires client_id within limits for the OAuth profile', async () => {
+    const fixture = oauthProfile();
+    const claims = { ...CLAIMS, jti: 'token-1' };
+
+    const oauthSigned = async (value: Record<string, unknown>) =>
+      validateJwt(
+        await (async () => {
+          const result = await signCompact(new TextEncoder().encode(JSON.stringify(value)), {
+            policy: AlgorithmPolicy.create('jws', ['RS256'], 'create'),
+            key: fixture.signing,
+            limits: LIMITS_V1,
+            protectedHeader: { typ: 'at+jwt' },
+          });
+          if (!result.ok) {
+            throw new Error(result.reason);
+          }
+          return result.token;
+        })(),
+        { profile: fixture.profile, limits: LIMITS_V1 },
+      );
+
+    assertReason(await oauthSigned(claims), 'client_id_missing_or_invalid');
+
+    const tooLong = await oauthSigned({ ...claims, client_id: 'c'.repeat(LIMITS_V1.identifier + 1) });
+    assert.strictEqual(tooLong.ok, false);
+    if (!tooLong.ok) {
+      assert.strictEqual(tooLong.category, 'resource_limit');
+      assert.strictEqual(tooLong.reason, 'client_id_too_long');
+    }
+  });
+
+  test('rejects an issuer the profile was not configured for', async () => {
+    const fixture = profile('project-jwt-v1');
+    const result = await validated(fixture, { ...CLAIMS, iss: 'https://attacker.example' });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'issuer_mismatch');
+      assert.strictEqual(result.reason, 'issuer_mismatch');
+    }
+  });
+
+  test('rejects a subject the validator declines', async () => {
+    const pair = keys();
+    const created = createJwtProfile({
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWS -> claims',
+      clock: { now: () => 1_000n },
+      subject: (_issuer, subject) => subject === 'bob',
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: pair.verification,
+        principalId: 'https://issuer.example',
+      },
+    });
+    assert.strictEqual(created.ok, true);
+    if (!created.ok) {
+      return;
+    }
+
+    const fixture = { profile: created.profile, signing: pair.signing };
+    assertReason(await validated(fixture, CLAIMS), 'subject_rejected');
+    assert.strictEqual((await validated(fixture, { ...CLAIMS, sub: 'bob' })).ok, true);
+  });
+
+  test('caps token age through the expiry and lifetime checks that precede it', async () => {
+    // The age cap itself is defence in depth and cannot be reached on its own:
+    // an unexpired token satisfies `now < exp + skew`, and a valid lifetime
+    // bounds `exp - iat`, which together already bound `now - iat`. These are
+    // the two checks that enforce it in practice.
+    const fixture = profile('project-jwt-v1', undefined, { now: () => 100_000n });
+    assertReason(await validated(fixture, { ...CLAIMS, iat: 90_000, exp: 100_500 }), 'lifetime_invalid');
+    assertReason(await validated(fixture, { ...CLAIMS, iat: 99_000, exp: 99_500 }), 'token_expired');
+  });
+});
+
