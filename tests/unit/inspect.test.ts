@@ -120,4 +120,50 @@ describe('unverified header inspection', () => {
       assert.strictEqual(result.reason, reason);
     }
   });
+
+  test('rejects a header that is not strict Base64url', () => {
+    for (const component of ['not base64url', 'AAAA=', 'eyJhbGciOiJFUzI1NiJ9\n', 'a+/b']) {
+      const result = inspectUnverifiedHeader(tokenWithComponent(component), { serialization: 'jws-compact' });
+      assert.strictEqual(result.ok, false, component);
+      assert.strictEqual(result.category, 'invalid_encoding');
+      assert.strictEqual(result.reason, 'protected_header_invalid_base64url');
+    }
+  });
+
+  test('rejects malformed JSON, invalid UTF-8, and duplicate members', () => {
+    const malformed = inspectUnverifiedHeader(tokenWithComponent(encodeBase64url(encoder.encode('{'))), {
+      serialization: 'jws-compact',
+    });
+    assert.strictEqual(malformed.ok, false);
+    assert.strictEqual(malformed.category, 'malformed_input');
+
+    // A lone 0xFF inside a string value: structurally valid JSON, invalid UTF-8.
+    const invalidUtf8 = inspectUnverifiedHeader(
+      tokenWithComponent(encodeBase64url(new Uint8Array([0x7b, 0x22, 0x61, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]))),
+      { serialization: 'jws-compact' },
+    );
+    assert.strictEqual(invalidUtf8.ok, false);
+    assert.strictEqual(invalidUtf8.category, 'invalid_encoding');
+    assert.strictEqual(invalidUtf8.reason, 'protected_header_invalid_encoding');
+
+    // A repeated member has no single value, so it is refused rather than
+    // resolved to whichever occurrence happens to come last.
+    const duplicate = inspectUnverifiedHeader(
+      tokenWithComponent(encodeBase64url(encoder.encode('{"alg":"ES256","alg":"HS256"}'))),
+      { serialization: 'jws-compact' },
+    );
+    assert.strictEqual(duplicate.ok, false);
+    assert.strictEqual(duplicate.reason, 'protected_header_duplicate_member');
+  });
+
+  test('rejects a header that is not a JSON object', () => {
+    for (const value of ['[]', '"alg"', '3', 'null', 'true']) {
+      const result = inspectUnverifiedHeader(tokenWithComponent(encodeBase64url(encoder.encode(value))), {
+        serialization: 'jws-compact',
+      });
+      assert.strictEqual(result.ok, false, value);
+      assert.strictEqual(result.category, 'invalid_header');
+      assert.strictEqual(result.reason, 'header_not_an_object');
+    }
+  });
 });
