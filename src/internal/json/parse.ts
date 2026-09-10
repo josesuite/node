@@ -17,7 +17,7 @@
  * while being read rather than after a complete value graph exists.
  */
 
-import { utf8Length } from '../encoding/utf8.ts';
+import { FATAL_DECODER, utf8Length } from '../encoding/utf8.ts';
 import type { JsonArray, JsonObject, JsonValue } from './types.ts';
 
 export type JsonFailure =
@@ -80,7 +80,6 @@ function isDigit(byte: number): boolean {
 class JsonParser {
   private readonly source: Uint8Array;
   private readonly budget: JsonBudget;
-  private readonly decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   private offset = 0;
   private nodes = 0;
 
@@ -424,7 +423,7 @@ class JsonParser {
 
   private decodeSlice(slice: Uint8Array): string {
     try {
-      return this.decoder.decode(slice);
+      return FATAL_DECODER.decode(slice);
     } catch {
       return this.fail('invalid_encoding');
     }
