@@ -10,7 +10,7 @@
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { attempt, attemptVerify, importJwk } from '../../internal/crypto/webcrypto.ts';
+import { attempt, attemptVerify, importCached, importJwk } from '../../internal/crypto/webcrypto.ts';
 import { rsaJwk, rsaPublicJwk, type RsaJwkParameters } from './rsa-common.ts';
 
 interface PssParameters {
@@ -29,6 +29,7 @@ export async function signRsaPss(
   algorithm: string,
   privateJwk: RsaJwkParameters,
   signingInput: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<Uint8Array>> {
   const parameters = PSS_ALGORITHMS[algorithm];
   if (parameters === undefined) {
@@ -36,7 +37,9 @@ export async function signRsaPss(
   }
 
   const result = await attempt(async () => {
-    const key = await importJwk(rsaJwk(privateJwk), { name: 'RSA-PSS', hash: parameters.hash }, ['sign']);
+    const key = await importCached(handleToken, () =>
+      importJwk(rsaJwk(privateJwk), { name: 'RSA-PSS', hash: parameters.hash }, ['sign']),
+    );
     return crypto.subtle.sign({ name: 'RSA-PSS', saltLength: parameters.saltBytes }, key, toBufferSource(signingInput));
   });
 
@@ -48,6 +51,7 @@ export async function verifyRsaPss(
   publicJwk: RsaJwkParameters,
   signingInput: Uint8Array,
   signature: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<boolean>> {
   const parameters = PSS_ALGORITHMS[algorithm];
   if (parameters === undefined) {
@@ -58,7 +62,9 @@ export async function verifyRsaPss(
   // rejection here means the key or the provider is unusable, which must not be
   // reported as a signature that did not verify.
   const key = await attempt(() =>
-    importJwk(rsaPublicJwk(publicJwk), { name: 'RSA-PSS', hash: parameters.hash }, ['verify']),
+    importCached(handleToken, () =>
+      importJwk(rsaPublicJwk(publicJwk), { name: 'RSA-PSS', hash: parameters.hash }, ['verify']),
+    ),
   );
   if (!key.ok) {
     return key;
