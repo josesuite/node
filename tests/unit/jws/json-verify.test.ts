@@ -922,3 +922,185 @@ describe('the operation decides on the configuration it validated', () => {
     assert.strictEqual((await pending).ok, true);
   });
 });
+
+function assertConfigurationFailure(result: Awaited<ReturnType<typeof verifyJson>>, reason: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.stage, 'configuration');
+    assert.strictEqual(result.reason, reason);
+  }
+}
+
+describe('trusted signer configuration', () => {
+  async function verifyWith(trusted: readonly TrustedSigner[], extra: Record<string, unknown> = {}) {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+    const aggregate = namedSigner('alice');
+    if (!aggregate.ok) {
+      throw new Error('bad aggregate fixture');
+    }
+    return verifyJson(new TextEncoder().encode(serialized), {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+      aggregate: aggregate.policy,
+      signers: trusted,
+      limits: LIMITS_V1,
+      ...extra,
+    });
+  }
+
+  test('rejects an empty signer list', async () => {
+    assertConfigurationFailure(await verifyWith([]), 'no_trusted_signers');
+  });
+
+  test('rejects more signers than the key limit allows', async () => {
+    const many = Array.from({ length: 4 }, (_, index) => ecSigner(`signer-${index}`));
+    const result = await verifyWith(trust(...many), { limits: lowerLimits({ jwksKeys: 3 }) });
+    assertConfigurationFailure(result, 'too_many_trusted_signers');
+  });
+
+  test('rejects a signer whose principal identifier is empty', async () => {
+    const alice = ecSigner('alice');
+    assertConfigurationFailure(await verifyWith([{ principalId: '', key: alice.verification }]), 'principal_id_empty');
+  });
+
+  test('rejects an aggregate policy that no signature could satisfy', async () => {
+    const alice = ecSigner('alice');
+    // A hand-built policy can reach here without passing its constructor; one
+    // referencing no principal would be satisfied by no signatures at all.
+    const result = await verifyWith(trust(alice), {
+      aggregate: { kind: 'threshold', required: 0, eligible: new Set<string>() },
+    });
+    assertConfigurationFailure(result, 'aggregate_policy_references_no_principal');
+  });
+
+  test('rejects one key bound to two principals', async () => {
+    // A signature under shared material would have no determinate signer, so
+    // the pair is refused rather than either binding being preferred.
+    const alice = ecSigner('alice');
+    const result = await verifyWith([
+      { principalId: 'alice', key: alice.verification },
+      { principalId: 'mallory', key: alice.verification },
+    ]);
+    assertConfigurationFailure(result, 'shared_key_material_across_principals');
+  });
+
+  test('rejects a MAC-backed principal the aggregate counts without a shared-secret profile', async () => {
+    // A MAC establishes only that some holder of the secret produced the entry,
+    // so counting it toward a distinct-signer policy needs an explicit profile.
+    const mac = macSigner('alice');
+    assertConfigurationFailure(
+      await verifyWith(trust(mac), { policy: AlgorithmPolicy.create('jws', ['HS256'], 'receive') }),
+      'mac_principal_requires_shared_secret_profile',
+    );
+  });
+
+  test('rejects limits that were never lowered from the baseline', async () => {
+    const alice = ecSigner('alice');
+    const result = await verifyWith(trust(alice), {
+      limits: { ...LIMITS_V1, joseInput: LIMITS_V1.joseInput + 1 },
+    });
+    assertConfigurationFailure(result, 'limit_joseInput_exceeds_baseline');
+  });
+});
+
+describe('JSON verification entry paths', () => {
+  async function verifyRaw(serialized: string, extra: Record<string, unknown> = {}) {
+    const alice = ecSigner('alice');
+    const aggregate = namedSigner('alice');
+    if (!aggregate.ok) {
+      throw new Error('bad aggregate fixture');
+    }
+    return verifyJson(new TextEncoder().encode(serialized), {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+      aggregate: aggregate.policy,
+      signers: trust(alice),
+      limits: LIMITS_V1,
+      ...extra,
+    });
+  }
+
+  test('rejects an object larger than the configured input limit', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+
+    const result = await verify(serialized, trust(alice), namedSigner('alice'), ['ES256'], {
+      limits: lowerLimits({ joseInput: 32 }),
+    });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'resource_limit');
+      assert.strictEqual(result.reason, 'input_too_large');
+    }
+  });
+
+  test('distinguishes the JSON failure modes that reject the document', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+
+    // Truncation and a repeated member are both structural defects in the
+    // document rather than defects in how its octets were encoded.
+    for (const source of [serialized.slice(0, serialized.length - 1), `{"payload":"a",${serialized.slice(1)}`]) {
+      const result = await verifyRaw(source);
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.category, 'malformed_input');
+      }
+    }
+
+    // Octets that are not UTF-8 at all fail as an encoding defect instead.
+    const invalidUtf8 = await verifyRaw(Buffer.from([0xff, 0xfe, 0xfd]).toString('latin1'));
+    assert.strictEqual(invalidUtf8.ok, false);
+    if (!invalidUtf8.ok) {
+      assert.strictEqual(invalidUtf8.category, 'malformed_input');
+    }
+
+    const deep = await verifyRaw(serialized, { limits: lowerLimits({ jsonDepth: 1 }) });
+    assert.strictEqual(deep.ok, false);
+    if (!deep.ok) {
+      assert.strictEqual(deep.category, 'resource_limit');
+    }
+  });
+
+  test('bounds the cryptographic layers a single call may consume', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+
+    const result = await verify(serialized, trust(alice), namedSigner('alice'), ['ES256'], {
+      limits: lowerLimits({ cryptographicLayers: 0 }),
+    });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'too_many_cryptographic_layers');
+    }
+  });
+
+  test('rejects a rewritten payload at the signature rather than at decoding', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256']);
+    const parsed = JSON.parse(serialized) as Record<string, unknown>;
+
+    // The signature covers the payload component, so any rewrite fails
+    // verification before the deferred decode is ever reached.
+    const tampered = JSON.stringify({ ...parsed, payload: 'not base64url!' });
+    const result = await verifyRaw(tampered);
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.stage, 'cryptographic');
+    }
+  });
+
+  test('rejects a detached payload larger than its own bound', async () => {
+    const alice = ecSigner('alice');
+    const serialized = await sign([alice], ['ES256'], { detached: true });
+
+    const result = await verify(serialized, trust(alice), namedSigner('alice'), ['ES256'], {
+      detachedPayload: PAYLOAD,
+      limits: lowerLimits({ detachedPayload: 4 }),
+    });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'resource_limit');
+      assert.strictEqual(result.reason, 'detached_payload_too_large');
+    }
+  });
+});

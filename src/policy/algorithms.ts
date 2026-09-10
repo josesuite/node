@@ -96,9 +96,14 @@ export class AlgorithmPolicy {
     return this.permitted.has(identifier);
   }
 
-  /** Sorted snapshot for capability reporting. */
+  /**
+   * Sorted snapshot for capability reporting.
+   *
+   * Ordering is by code unit, not locale, because callers compare two snapshots
+   * positionally to decide whether policies match.
+   */
   identifiers(): readonly string[] {
-    return [...this.permitted].toSorted();
+    return [...this.permitted].toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0));
   }
 }
 

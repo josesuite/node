@@ -558,3 +558,204 @@ describe('metadata size limits', () => {
     assert.strictEqual(result.ok, true);
   });
 });
+
+function assertRejected(result: ReturnType<typeof importKey>, reason: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.reason, reason);
+  }
+}
+
+/** Encodes a big-endian unsigned integer in the minimal form JWK requires. */
+function uint(value: bigint): string {
+  let hex = value.toString(16);
+  if (hex.length % 2 === 1) {
+    hex = `0${hex}`;
+  }
+  return Buffer.from(hex, 'hex').toString('base64url');
+}
+
+function big(jwk: Record<string, string>, member: string): bigint {
+  return BigInt(`0x${Buffer.from(jwk[member]!, 'base64url').toString('hex')}`);
+}
+
+function x25519Jwk(): Record<string, string> {
+  return generateKeyPairSync('x25519').privateKey.export({
+    format: 'jwk',
+  }) as unknown as Record<string, string>;
+}
+
+describe('RSA material validation', () => {
+  /** Mutates one supplied key so overrides stay consistent with its own members. */
+  function importRsa(jwk: Record<string, string>, overrides: Record<string, unknown>) {
+    return importKey(object({ ...jwk, ...overrides }), RSA_SIGN);
+  }
+
+  test('rejects a modulus that is even', async () => {
+    // Not a product of two odd primes, so it cannot be a valid RSA modulus
+    // regardless of its size.
+    const jwk = rsaJwk();
+    const n = BigInt(`0x${Buffer.from(jwk['n']!, 'base64url').toString('hex')}`);
+    assertRejected(importRsa(jwk, { n: uint(n + 1n) }), 'n_even');
+  });
+
+  test('admits the 2048-bit range only under an explicitly receive-only binding', async () => {
+    const jwk = object(rsaJwk(2048));
+    assertRejected(importKey(jwk, RSA_SIGN), 'n_too_small');
+    assertRejected(importKey(jwk, { algorithm: 'RS256', operation: 'verify' }), 'n_too_small');
+
+    const receiving = importKey(jwk, { algorithm: 'RS256', operation: 'verify', receiveOnly: true });
+    assert.strictEqual(receiving.ok, true);
+  });
+
+  test('rejects an exponent that is even, too small, or not less than the modulus', async () => {
+    const jwk = rsaJwk();
+    const n = BigInt(`0x${Buffer.from(jwk['n']!, 'base64url').toString('hex')}`);
+
+    assertRejected(importRsa(jwk, { e: uint(4n) }), 'e_even');
+    assertRejected(importRsa(jwk, { e: uint(1n) }), 'e_too_small');
+    // Bounded to 32 bits, so an exponent at or above the modulus is refused on
+    // its own decode allowance before the comparison is reached.
+    assert.strictEqual(importRsa(jwk, { e: uint(n) }).ok, false);
+  });
+
+  test('rejects members that are not minimally encoded unsigned integers', async () => {
+    // A leading zero octet is not the minimal encoding, which would let one
+    // value be written several ways.
+    const jwk = rsaJwk();
+    const padded = Buffer.concat([Buffer.alloc(1), Buffer.from(jwk['n']!, 'base64url')]);
+    assert.strictEqual(importRsa(jwk, { n: padded.toString('base64url') }).ok, false);
+
+    assert.strictEqual(importRsa(jwk, { n: '' }).ok, false);
+    assert.strictEqual(importRsa(jwk, { n: 'not base64url!' }).ok, false);
+  });
+});
+
+describe('EC material validation', () => {
+  test('rejects coordinates of the wrong width for the curve', async () => {
+    const jwk = ecJwk();
+    const short = Buffer.alloc(8, 1).toString('base64url');
+
+    for (const member of ['x', 'y', 'd'] as const) {
+      const result = importKey(object({ ...jwk, [member]: short }), { algorithm: 'ES256', operation: 'sign' });
+      assert.strictEqual(result.ok, false);
+    }
+  });
+
+  test('rejects a point that is not on the named curve', async () => {
+    // Coordinates outside the field, points off the curve, and the point at
+    // infinity would all make the key unusable as an identity.
+    const jwk = ecJwk();
+    const x = Buffer.from(jwk['x']!, 'base64url');
+    const flipped = Buffer.from(x.map((byte, index) => (index === 0 ? byte ^ 0xff : byte)));
+
+    assertRejected(
+      importKey(object({ ...jwk, x: flipped.toString('base64url'), d: undefined }), EC_VERIFY),
+      'point_not_on_curve',
+    );
+  });
+
+  test('rejects a private scalar that does not derive the published point', async () => {
+    const jwk = ecJwk();
+    const other = ecJwk();
+
+    // The published point and the scalar describe different keys, so the pair
+    // is refused rather than either half being trusted.
+    assertRejected(
+      importKey(object({ ...jwk, d: other['d'] }), { algorithm: 'ES256', operation: 'sign' }),
+      'public_private_mismatch',
+    );
+  });
+
+  test('rejects a private scalar outside the valid range', async () => {
+    const jwk = ecJwk();
+    const zero = Buffer.alloc(32).toString('base64url');
+
+    assertRejected(
+      importKey(object({ ...jwk, d: zero }), { algorithm: 'ES256', operation: 'sign' }),
+      'private_scalar_invalid',
+    );
+  });
+});
+
+describe('RSA private CRT validation', () => {
+  /** Mutates one supplied key so overrides stay consistent with its own members. */
+  function importPrivate(jwk: Record<string, string>, overrides: Record<string, unknown>) {
+    return importKey(object({ ...jwk, ...overrides }), RSA_SIGN);
+  }
+
+  test('refuses multi-prime keys rather than ignoring the extra factors', async () => {
+    // Their presence changes the meaning of every other CRT parameter.
+    assertRejected(importPrivate(rsaJwk(), { oth: [] }), 'oth_unsupported');
+  });
+
+  test('rejects equal or degenerate prime factors', async () => {
+    const jwk = rsaJwk();
+    // Equal factors also break the product check, so the modulus is rebuilt as
+    // `p * p` to reach the equality test that precedes it.
+    const p = big(jwk, 'p');
+    assertRejected(importPrivate(jwk, { q: jwk['p'], n: uint(p * p) }), 'p_equals_q');
+
+    // A forged `p = 1` satisfies the product check on its own, and `p - 1` is
+    // used as a modulus below where a zero divisor would throw.
+    assertRejected(importPrivate(jwk, { p: uint(1n), q: jwk['n'] }), 'factor_not_greater_than_one');
+  });
+
+  test('rejects factors whose product is not the modulus', async () => {
+    const jwk = rsaJwk();
+    assertRejected(importPrivate(jwk, { p: uint(big(jwk, 'p') + 2n) }), 'pq_product_mismatch');
+  });
+
+  test('rejects CRT parameters inconsistent with the private exponent', async () => {
+    const jwk = rsaJwk();
+
+    assertRejected(importPrivate(jwk, { dp: uint(big(jwk, 'dp') + 1n) }), 'dp_mismatch');
+    assertRejected(importPrivate(jwk, { dq: uint(big(jwk, 'dq') + 1n) }), 'dq_mismatch');
+    assertRejected(importPrivate(jwk, { qi: uint(big(jwk, 'qi') + 1n) }), 'qi_mismatch');
+  });
+});
+
+describe('OKP material validation', () => {
+  const AGREEMENT = { algorithm: 'ECDH-ES', operation: 'deriveKey', contentAlgorithms: ['A128GCM'] } as const;
+
+  test('refuses the Ed curves as unqualified before any material is read', () => {
+    // The signing curves are gated at import rather than rejected later, so no
+    // key bound to them can reach a cryptographic operation.
+    for (const crv of ['Ed25519', 'Ed448']) {
+      const result = importKey(object({ kty: 'OKP', crv, x: Buffer.alloc(32).toString('base64url') }), {
+        algorithm: 'EdDSA',
+        operation: 'verify',
+      });
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.reason, 'curve_not_qualified');
+        assert.strictEqual(result.category, 'unsupported_algorithm');
+      }
+    }
+  });
+
+  test('rejects components of the wrong width for the curve', () => {
+    const jwk = x25519Jwk();
+    const short = Buffer.alloc(8, 1).toString('base64url');
+
+    assertRejected(importKey(object({ ...jwk, x: short }), AGREEMENT), 'x_wrong_length');
+    assertRejected(importKey(object({ ...jwk, d: short }), AGREEMENT), 'd_wrong_length');
+  });
+
+  test('rejects a private key that does not derive the published public key', () => {
+    const jwk = x25519Jwk();
+    const other = x25519Jwk();
+
+    assertRejected(importKey(object({ ...jwk, d: other['d'] }), AGREEMENT), 'public_private_mismatch');
+  });
+
+  test('imports a public-only agreement key', () => {
+    const { d: _d, ...publicOnly } = x25519Jwk();
+
+    const result = importKey(object(publicOnly), AGREEMENT);
+    assert.strictEqual(result.ok, true);
+    if (result.ok) {
+      assert.strictEqual(result.key.isPrivate, false);
+    }
+  });
+});

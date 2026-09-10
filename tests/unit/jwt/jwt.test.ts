@@ -6,8 +6,8 @@ import { generateKeyPairSync } from 'node:crypto';
 import { parseJson } from '../../../src/internal/json/parse.ts';
 import type { JsonObject } from '../../../src/internal/json/types.ts';
 import { createJwt, createJwtWithRandom } from '../../../src/jwt/create.ts';
-import { createJwtProfile } from '../../../src/jwt/profile.ts';
-import type { ReplayStore } from '../../../src/jwt/types.ts';
+import { createJwtProfile, isJwtProfile } from '../../../src/jwt/profile.ts';
+import type { JwtProfileInput, ReplayStore } from '../../../src/jwt/types.ts';
 import { validateJwt } from '../../../src/jwt/validate.ts';
 import { encryptCompact } from '../../../src/jwe/compact.ts';
 import { composeNonce, type NonceAllocator, type NonceResult } from '../../../src/jwe/nonce.ts';
@@ -855,6 +855,767 @@ describe('audience matching across both permitted encodings', () => {
         assert.strictEqual(result.category, 'claim_validation_failure');
         assert.strictEqual(result.reason, 'required_claim_missing_or_invalid');
       }
+    }
+  });
+});
+
+describe('JWT profile configuration', () => {
+  function baseInput(): JwtProfileInput {
+    const pair = keys();
+    return {
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWS -> claims',
+      clock: { now: () => 1_000n },
+      subject: () => true,
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: pair.verification,
+        principalId: 'https://issuer.example',
+      },
+    };
+  }
+
+  function rejects(reason: string, overrides: Partial<Record<keyof JwtProfileInput, unknown>>): void {
+    const result = createJwtProfile({ ...baseInput(), ...overrides } as JwtProfileInput);
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, reason);
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.stage, 'configuration');
+    }
+  }
+
+  test('rejects unregistered profile names', () => {
+    for (const name of ['', 'project-jwt-v2', 'PROJECT-JWT-V1', 'oauth-at-jwt']) {
+      rejects('unsupported_jwt_profile', { name });
+    }
+  });
+
+  test('requires a non-empty issuer and audience within the identifier limit', () => {
+    rejects('expected_issuer_required', { issuer: '' });
+    rejects('expected_audience_required', { audience: '' });
+
+    const long = 'a'.repeat(LIMITS_V1.identifier + 1);
+    rejects('expected_identifier_too_long', { issuer: long });
+    rejects('expected_identifier_too_long', { audience: long });
+  });
+
+  test('requires an explicit media type that is not the generic application/jwt', () => {
+    for (const type of ['', 'not a media type', 'application/']) {
+      rejects('expected_type_invalid', { type });
+    }
+    // The generic type carries no distinguishing information, so it is refused
+    // in both the bare and fully qualified spellings.
+    rejects('expected_type_invalid', { type: 'JWT' });
+    rejects('expected_type_invalid', { type: 'application/jwt' });
+  });
+
+  test('rejects an unknown chain and mismatched decryption policy', () => {
+    rejects('invalid_jwt_chain', { chain: 'JWE -> claims' });
+    rejects('decryption_policy_required', { chain: 'JWE -> JWS -> claims' });
+
+    const encryption = encryptionKeys();
+    rejects('unexpected_decryption_policy', {
+      chain: 'JWS -> claims',
+      decryption: {
+        keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'receive'),
+        contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'receive'),
+        recipients: [{ principalId: 'recipient', key: encryption.decryption }],
+        principalId: 'recipient',
+      },
+    });
+  });
+
+  test('binds the verification principal to the issuer', () => {
+    const input = baseInput();
+    rejects('verification_principal_must_match_issuer', {
+      verification: { ...input.verification, principalId: 'https://other.example' },
+    });
+  });
+
+  test('refuses the unencoded payload mode for every JWT profile', () => {
+    const input = baseInput();
+    rejects('unencoded_payload_not_available_for_jwt', {
+      verification: { ...input.verification, unencodedPayload: true },
+    });
+  });
+
+  test('requires a subject validator function', () => {
+    for (const subject of [undefined, null, true, 'alice', {}]) {
+      rejects('subject_validator_required', { subject });
+    }
+  });
+
+  test('caps clock skew at five minutes and rejects non-integral values', () => {
+    for (const skew of [-1, 301, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 2]) {
+      rejects('invalid_clock_skew', { skew });
+    }
+
+    for (const skew of [undefined, 0, 300]) {
+      const result = createJwtProfile({ ...baseInput(), skew } as JwtProfileInput);
+      assert.strictEqual(result.ok, true);
+      if (result.ok) {
+        assert.strictEqual(result.profile.skew, BigInt(skew ?? 0));
+      }
+    }
+  });
+
+  test('requires a replay store for the single-use profile', () => {
+    rejects('replay_store_required', { name: 'project-single-use-jwt-v1' });
+  });
+
+  test('requires RS256 support and a bounded lifetime for the OAuth profile', () => {
+    const rsa = rsaKeys();
+    const oauth = {
+      name: 'oauth-at-jwt-v1',
+      type: 'at+jwt',
+      maximumLifetime: 600,
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['RS256'], 'receive'),
+        key: rsa.verification,
+        principalId: 'https://issuer.example',
+      },
+    };
+
+    rejects('oauth_access_token_type_required', { ...oauth, type: 'project+jwt' });
+
+    // The profile is defined over RS256, so neither a policy that omits it nor a
+    // key bound to a different algorithm can satisfy it.
+    const es = keys();
+    rejects('oauth_rs256_support_required', {
+      ...oauth,
+      verification: { ...oauth.verification, policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive') },
+    });
+    rejects('oauth_rs256_support_required', {
+      ...oauth,
+      verification: { ...oauth.verification, key: es.verification },
+    });
+
+    rejects('oauth_maximum_lifetime_required', { ...oauth, maximumLifetime: undefined });
+  });
+
+  test('rejects a non-positive maximum lifetime and fixes it outside the OAuth profile', () => {
+    const rsa = rsaKeys();
+    const oauth = {
+      name: 'oauth-at-jwt-v1',
+      type: 'at+jwt',
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['RS256'], 'receive'),
+        key: rsa.verification,
+        principalId: 'https://issuer.example',
+      },
+    };
+
+    for (const maximumLifetime of [0, -1, 1.5]) {
+      rejects('invalid_maximum_lifetime', { ...oauth, maximumLifetime });
+    }
+
+    rejects('fixed_maximum_lifetime', { maximumLifetime: 600 });
+  });
+
+  test('brands only profiles built here, and namespaces replay by profile identity', () => {
+    const result = createJwtProfile(baseInput());
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+
+    assert.strictEqual(isJwtProfile(result.profile), true);
+    assert.strictEqual(result.profile.maximumLifetime, 3_600n);
+    assert.deepStrictEqual(JSON.parse(result.profile.replayNamespace), [
+      'project-jwt-v1',
+      1,
+      'https://issuer.example',
+      'api',
+    ]);
+
+    // A copy carries the same fields but not the brand, so validation cannot be
+    // bypassed with a profile-shaped literal.
+    assert.strictEqual(isJwtProfile({ ...result.profile }), false);
+  });
+});
+
+describe('JWT creation binding and claim serialization', () => {
+  function create(fixture: ReturnType<typeof profile>, overrides: Record<string, unknown> = {}) {
+    return createJwt({
+      profile: fixture.profile,
+      limits: LIMITS_V1,
+      claims: CLAIMS,
+      signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: fixture.signing },
+      ...overrides,
+    } as Parameters<typeof createJwt>[0]);
+  }
+
+  test('rejects a profile that was not built by createJwtProfile', async () => {
+    const fixture = profile('project-jwt-v1');
+    const result = await create(fixture, { profile: { ...fixture.profile } });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'invalid_jwt_profile');
+    }
+  });
+
+  test('rejects a signing key that the profile would not verify with', async () => {
+    const fixture = profile('project-jwt-v1');
+    // A different key pair of the same algorithm: the binding is on key
+    // identity, not merely on the algorithm agreeing.
+    const other = keys();
+    const result = await create(fixture, {
+      signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: other.signing },
+    });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'signing_key_not_bound_to_profile');
+    }
+  });
+
+  test('rejects a chain that disagrees with the presence of encryption options', async () => {
+    const fixture = profile('project-jwt-v1');
+    const encryption = encryptionKeys();
+    const result = await create(fixture, {
+      encryption: {
+        keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256KW'], 'create'),
+        contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'create'),
+        contentAlgorithm: 'A128GCM',
+        recipients: [{ principalId: 'recipient', key: encryption.encryption }],
+        nonces: allocator(),
+      },
+    });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'creation_chain_mismatch');
+    }
+  });
+
+  test('rejects claims that have no faithful JSON serialization', async () => {
+    const fixture = profile('project-jwt-v1');
+
+    // Each of these would be dropped or silently coerced by `JSON.stringify`,
+    // producing a token whose claims differ from what the caller supplied.
+    const unserializable: unknown[] = [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      -1n,
+      9_007_199_254_740_992n,
+      undefined,
+      () => 1,
+      Symbol('claim'),
+    ];
+
+    for (const value of unserializable) {
+      const result = await create(fixture, { claims: { ...CLAIMS, extra: value } });
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.reason, 'claims_not_json_serializable');
+      }
+    }
+  });
+
+  test('serializes nested claims deterministically regardless of key order', async () => {
+    const fixture = profile('project-jwt-v1');
+    const extra = { list: [1, 'two', true, null], nested: { b: 2n, a: 'x' } };
+
+    const first = await create(fixture, { claims: { ...CLAIMS, extra } });
+    const second = await create(fixture, {
+      claims: { ...CLAIMS, extra: { nested: { a: 'x', b: 2n }, list: [1, 'two', true, null] } },
+    });
+
+    assert.strictEqual(first.ok, true);
+    assert.strictEqual(second.ok, true);
+    if (first.ok && second.ok) {
+      // Only the payload segment is compared: ECDSA signatures are randomized,
+      // so equal claim bytes do not imply equal tokens.
+      assert.strictEqual(first.token.split('.')[1], second.token.split('.')[1]);
+    }
+  });
+
+  test('reports a clock that throws separately from one that returns an invalid value', async () => {
+    const throwing = profile('project-jwt-v1', undefined, {
+      now: () => {
+        throw new Error('clock offline');
+      },
+    });
+    const result = await create(throwing);
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'backend_failure');
+      assert.strictEqual(result.reason, 'trusted_clock_unavailable');
+    }
+
+    const wrongType = profile('project-jwt-v1', undefined, { now: () => 1_000 as unknown as bigint });
+    const typeResult = await create(wrongType);
+    assert.strictEqual(typeResult.ok, false);
+    if (!typeResult.ok) {
+      assert.strictEqual(typeResult.reason, 'trusted_clock_invalid');
+    }
+  });
+
+  test('fails closed when the randomness source throws while minting a jti', async () => {
+    const store: ReplayStore = { admit: () => Promise.resolve('admitted') };
+    const fixture = profile('project-single-use-jwt-v1', store);
+    const result = await createJwtWithRandom(
+      {
+        profile: fixture.profile,
+        limits: LIMITS_V1,
+        claims: CLAIMS,
+        signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: fixture.signing },
+      },
+      {
+        randomBytes: () => {
+          throw new Error('entropy unavailable');
+        },
+      },
+    );
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'backend_failure');
+      assert.strictEqual(result.reason, 'randomness_unavailable');
+    }
+  });
+});
+
+function assertReason(result: Awaited<ReturnType<typeof validateJwt>>, reason: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.reason, reason);
+  }
+}
+
+describe('JWT claim semantics', () => {
+  async function validated(fixture: ReturnType<typeof profile>, claims: Record<string, unknown>) {
+    return validateJwt(await signed(fixture, JSON.stringify(claims)), {
+      profile: fixture.profile,
+      limits: LIMITS_V1,
+    });
+  }
+
+  test('rejects present-but-malformed string claims rather than treating them as absent', async () => {
+    const fixture = profile('project-jwt-v1');
+
+    for (const name of ['iss', 'sub', 'jti'] as const) {
+      for (const value of ['', 1, null, true, [], {}]) {
+        assertReason(await validated(fixture, { ...CLAIMS, [name]: value }), `${name}_invalid`);
+      }
+    }
+  });
+
+  test('rejects present-but-malformed temporal claims', async () => {
+    const fixture = profile('project-jwt-v1');
+
+    for (const name of ['exp', 'nbf', 'iat'] as const) {
+      for (const value of ['900', null, true, [], {}, -1]) {
+        assertReason(await validated(fixture, { ...CLAIMS, [name]: value }), `${name}_invalid`);
+      }
+    }
+  });
+
+  test('enforces identifier and jti size limits at the claims stage', async () => {
+    const fixture = profile('project-jwt-v1');
+    const long = `https://issuer.example/${'a'.repeat(LIMITS_V1.identifier)}`;
+
+    for (const claims of [{ iss: long }, { sub: long }, { aud: long }]) {
+      const result = await validated(fixture, { ...CLAIMS, ...claims });
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.category, 'resource_limit');
+        assert.strictEqual(result.reason, 'identifier_too_long');
+      }
+    }
+
+    // The cap applies even though `jti` is optional for this profile.
+    const oversizedJti = await validated(fixture, { ...CLAIMS, jti: 'j'.repeat(LIMITS_V1.jti + 1) });
+    assert.strictEqual(oversizedJti.ok, false);
+    if (!oversizedJti.ok) {
+      assert.strictEqual(oversizedJti.category, 'resource_limit');
+      assert.strictEqual(oversizedJti.reason, 'jti_too_long');
+    }
+  });
+
+  test('reports a subject validator that throws as a backend failure, not a rejection', async () => {
+    const pair = keys();
+    const result = createJwtProfile({
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWS -> claims',
+      clock: { now: () => 1_000n },
+      subject: () => {
+        throw new Error('directory unavailable');
+      },
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: pair.verification,
+        principalId: 'https://issuer.example',
+      },
+    });
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+
+    const fixture = { profile: result.profile, signing: pair.signing };
+    const validation = await validated(fixture, CLAIMS);
+    assert.strictEqual(validation.ok, false);
+    if (!validation.ok) {
+      assert.strictEqual(validation.category, 'backend_failure');
+      assert.strictEqual(validation.stage, 'context_admission');
+      assert.strictEqual(validation.reason, 'subject_validator_failed');
+    }
+  });
+
+  test('rejects a validity window that never opens', async () => {
+    // Skew is what separates this from `token_not_yet_valid`: it must be wide
+    // enough for `nbf` to pass the not-yet-valid check while still landing at or
+    // after `exp`, which describes a token usable at no instant.
+    const pair = keys();
+    const created = createJwtProfile({
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWS -> claims',
+      clock: { now: () => 1_000n },
+      skew: 300,
+      subject: () => true,
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: pair.verification,
+        principalId: 'https://issuer.example',
+      },
+    });
+    assert.strictEqual(created.ok, true);
+    if (!created.ok) {
+      return;
+    }
+
+    const fixture = { profile: created.profile, signing: pair.signing };
+    assertReason(await validated(fixture, { ...CLAIMS, nbf: 1_100, exp: 1_100 }), 'nbf_not_before_exp');
+  });
+
+  test('rejects an issuance time in the future', async () => {
+    const fixture = profile('project-jwt-v1');
+    assertReason(await validated(fixture, { ...CLAIMS, iat: 1_001 }), 'iat_invalid');
+  });
+
+  test('caps the claimed lifetime and the token age independently of expiry', async () => {
+    const fixture = profile('project-jwt-v1');
+    // Unexpired at `now`, but the issuer claims a lifetime beyond the profile cap.
+    assertReason(await validated(fixture, { ...CLAIMS, iat: 900, exp: 900 + 3_601 }), 'lifetime_invalid');
+
+    // Within the claimed lifetime, but minted far enough in the past that the
+    // token's actual age exceeds the cap.
+    const old = profile('project-jwt-v1', undefined, { now: () => 10_000n });
+    assertReason(await validated(old, { ...CLAIMS, iat: 1, exp: 20_000 }), 'lifetime_invalid');
+  });
+
+  test('requires client_id within limits for the OAuth profile', async () => {
+    const fixture = oauthProfile();
+    const claims = { ...CLAIMS, jti: 'token-1' };
+
+    const oauthSigned = async (value: Record<string, unknown>) =>
+      validateJwt(
+        await (async () => {
+          const result = await signCompact(new TextEncoder().encode(JSON.stringify(value)), {
+            policy: AlgorithmPolicy.create('jws', ['RS256'], 'create'),
+            key: fixture.signing,
+            limits: LIMITS_V1,
+            protectedHeader: { typ: 'at+jwt' },
+          });
+          if (!result.ok) {
+            throw new Error(result.reason);
+          }
+          return result.token;
+        })(),
+        { profile: fixture.profile, limits: LIMITS_V1 },
+      );
+
+    assertReason(await oauthSigned(claims), 'client_id_missing_or_invalid');
+
+    const tooLong = await oauthSigned({ ...claims, client_id: 'c'.repeat(LIMITS_V1.identifier + 1) });
+    assert.strictEqual(tooLong.ok, false);
+    if (!tooLong.ok) {
+      assert.strictEqual(tooLong.category, 'resource_limit');
+      assert.strictEqual(tooLong.reason, 'client_id_too_long');
+    }
+  });
+
+  test('rejects an issuer the profile was not configured for', async () => {
+    const fixture = profile('project-jwt-v1');
+    const result = await validated(fixture, { ...CLAIMS, iss: 'https://attacker.example' });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'issuer_mismatch');
+      assert.strictEqual(result.reason, 'issuer_mismatch');
+    }
+  });
+
+  test('rejects a subject the validator declines', async () => {
+    const pair = keys();
+    const created = createJwtProfile({
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWS -> claims',
+      clock: { now: () => 1_000n },
+      subject: (_issuer, subject) => subject === 'bob',
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: pair.verification,
+        principalId: 'https://issuer.example',
+      },
+    });
+    assert.strictEqual(created.ok, true);
+    if (!created.ok) {
+      return;
+    }
+
+    const fixture = { profile: created.profile, signing: pair.signing };
+    assertReason(await validated(fixture, CLAIMS), 'subject_rejected');
+    assert.strictEqual((await validated(fixture, { ...CLAIMS, sub: 'bob' })).ok, true);
+  });
+
+  test('caps token age through the expiry and lifetime checks that precede it', async () => {
+    // The age cap itself is defence in depth and cannot be reached on its own:
+    // an unexpired token satisfies `now < exp + skew`, and a valid lifetime
+    // bounds `exp - iat`, which together already bound `now - iat`. These are
+    // the two checks that enforce it in practice.
+    const fixture = profile('project-jwt-v1', undefined, { now: () => 100_000n });
+    assertReason(await validated(fixture, { ...CLAIMS, iat: 90_000, exp: 100_500 }), 'lifetime_invalid');
+    assertReason(await validated(fixture, { ...CLAIMS, iat: 99_000, exp: 99_500 }), 'token_expired');
+  });
+});
+
+describe('JWT validation structure and admission', () => {
+  test('rejects a profile that was not built by createJwtProfile', async () => {
+    const fixture = profile('project-jwt-v1');
+    const token = await signed(fixture, JSON.stringify(CLAIMS));
+    const result = await validateJwt(token, { profile: { ...fixture.profile }, limits: LIMITS_V1 });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'invalid_jwt_profile');
+    }
+  });
+
+  test('reports a clock that throws separately from one that returns an invalid value', async () => {
+    const fixture = profile('project-jwt-v1');
+    const token = await signed(fixture, JSON.stringify(CLAIMS));
+
+    const throwing = profile('project-jwt-v1', undefined, {
+      now: () => {
+        throw new Error('clock offline');
+      },
+    });
+    const unavailable = await validateJwt(token, { profile: throwing.profile, limits: LIMITS_V1 });
+    assert.strictEqual(unavailable.ok, false);
+    if (!unavailable.ok) {
+      assert.strictEqual(unavailable.category, 'backend_failure');
+      assert.strictEqual(unavailable.reason, 'trusted_clock_unavailable');
+    }
+
+    for (const now of [() => 1_000 as unknown as bigint, () => -1n]) {
+      const invalid = profile('project-jwt-v1', undefined, { now });
+      const result = await validateJwt(token, { profile: invalid.profile, limits: LIMITS_V1 });
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.reason, 'trusted_clock_invalid');
+      }
+    }
+  });
+
+  test('rejects limits that were never lowered from the baseline', async () => {
+    const fixture = profile('project-jwt-v1');
+    const token = await signed(fixture, JSON.stringify(CLAIMS));
+    // Limits arrive as a plain structural value, so a caller can present one
+    // that raises a bound above the baseline rather than lowering it.
+    const raised = { ...LIMITS_V1, jwtInput: LIMITS_V1.jwtInput + 1 };
+
+    const result = await validateJwt(token, { profile: fixture.profile, limits: raised });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'policy_violation');
+      assert.strictEqual(result.reason, 'limit_jwtInput_exceeds_baseline');
+    }
+
+    const created = await createJwt({
+      profile: fixture.profile,
+      limits: raised,
+      claims: CLAIMS,
+      signing: { policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'), key: fixture.signing },
+    });
+    assert.strictEqual(created.ok, false);
+    if (!created.ok) {
+      assert.strictEqual(created.reason, 'limit_jwtInput_exceeds_baseline');
+    }
+  });
+
+  test('refuses a JWS that marks its payload unencoded', async () => {
+    const fixture = profile('project-jwt-v1');
+    // A JWT payload is always Base64url-encoded JSON; an unencoded one could
+    // carry a period and change how the token's own components split. The JWT
+    // profile never enables the mode, so the signature layer refuses the token
+    // first and the JWT-level `b64` check behind it is defence in depth.
+    // The unencoded profile permits only printable ASCII, which excludes the
+    // `//` of the usual issuer URL; the payload-encoding check runs before any
+    // claim validation, so the claim values here are immaterial.
+    const claims = new TextEncoder().encode(JSON.stringify({ ...CLAIMS, iss: 'issuer' }));
+    const result = await signCompact(claims, {
+      policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
+      key: fixture.signing,
+      limits: LIMITS_V1,
+      protectedHeader: { typ: 'project+jwt' },
+      unencoded: true,
+      detached: true,
+    });
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+
+    const [header, , signature] = result.token.split('.');
+    const token = `${header}.${Buffer.from(claims).toString('base64url')}.${signature}`;
+    const validation = await validateJwt(token, { profile: fixture.profile, limits: LIMITS_V1 });
+    assert.strictEqual(validation.ok, false);
+    if (!validation.ok) {
+      assert.strictEqual(validation.reason, 'unencoded_payload_not_accepted');
+    }
+  });
+
+  test('binds the signing key to the claimed issuer at the two reachable enforcement points', async () => {
+    // Without this binding any trusted key could mint a token for any issuer.
+    // The inner `key_issuer_mismatch` guard is defence in depth and cannot be
+    // reached: the profile fixes the verification principal to the issuer, and
+    // the claims stage has already refused any other `iss`. These are the two
+    // checks that enforce the binding in practice.
+    const fixture = profile('project-jwt-v1');
+    const mismatch = await validateJwt(
+      await signed(fixture, JSON.stringify({ ...CLAIMS, iss: 'https://attacker.example' })),
+      { profile: fixture.profile, limits: LIMITS_V1 },
+    );
+    assert.strictEqual(mismatch.ok, false);
+    if (!mismatch.ok) {
+      assert.strictEqual(mismatch.category, 'issuer_mismatch');
+    }
+
+    const pair = keys();
+    const configured = createJwtProfile({
+      name: 'project-jwt-v1',
+      issuer: 'https://issuer.example',
+      audience: 'api',
+      type: 'project+jwt',
+      chain: 'JWS -> claims',
+      clock: { now: () => 1_000n },
+      subject: () => true,
+      verification: {
+        policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
+        key: pair.verification,
+        principalId: 'https://other.example',
+      },
+    });
+    assert.strictEqual(configured.ok, false);
+    if (!configured.ok) {
+      assert.strictEqual(configured.reason, 'verification_principal_must_match_issuer');
+    }
+  });
+
+  test('rejects a token larger than the configured input limit', async () => {
+    const fixture = profile('project-jwt-v1');
+    const token = await signed(fixture, JSON.stringify(CLAIMS));
+    const result = await validateJwt(token, { profile: fixture.profile, limits: lowerLimits({ jwtInput: 16 }) });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'resource_limit');
+      assert.strictEqual(result.reason, 'jwt_too_large');
+    }
+  });
+
+  test('rejects a chain that disagrees with the presented serialization', async () => {
+    const fixture = profile('project-jwt-v1');
+    // A JWE presented where the profile expects a JWS: five components rather
+    // than three, refused on structure before any cryptography runs.
+    const result = await validateJwt('a.b.c.d.e', { profile: fixture.profile, limits: LIMITS_V1 });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.reason, 'jwt_chain_mismatch');
+    }
+  });
+
+  test('rejects claims that parse as JSON but are not an object', async () => {
+    const fixture = profile('project-jwt-v1');
+    for (const payload of ['[]', '"claims"', '42', 'null', 'true']) {
+      const result = await validateJwt(await signed(fixture, payload), {
+        profile: fixture.profile,
+        limits: LIMITS_V1,
+      });
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.reason, 'claims_must_be_object');
+      }
+    }
+  });
+
+  test('projects claims with a null prototype and NumericDate only at the top level', async () => {
+    const fixture = profile('project-jwt-v1');
+    const claims = { ...CLAIMS, nbf: 900, meta: { exp: 5, note: 'x' }, tags: ['a', 1, null], flag: true };
+    const result = await validateJwt(await signed(fixture, JSON.stringify(claims)), {
+      profile: fixture.profile,
+      limits: LIMITS_V1,
+    });
+
+    assert.strictEqual(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+
+    const view = result.value.claims;
+    assert.strictEqual(Object.getPrototypeOf(view), null);
+    for (const name of ['exp', 'nbf', 'iat'] as const) {
+      assert.strictEqual(typeof view[name], 'bigint');
+    }
+    assert.strictEqual(view['flag'], true);
+    // A nested `exp` never passed NumericDate validation, so it stays an
+    // unconverted JSON number alongside the other non-temporal values.
+    const meta = view['meta'] as Record<string, unknown>;
+    assert.deepStrictEqual(meta['exp'], { lexeme: '5' });
+    assert.deepStrictEqual(view['tags'], ['a', { lexeme: '1' }, null]);
+  });
+
+  test('reports a replay store that throws or cannot confirm uniqueness as unavailable', async () => {
+    const claims = JSON.stringify({ ...CLAIMS, jti: 'token-1' });
+
+    const throwing = profile('project-single-use-jwt-v1', {
+      admit: () => {
+        throw new Error('store offline');
+      },
+    });
+    const thrown = await validateJwt(await signed(throwing, claims), {
+      profile: throwing.profile,
+      limits: LIMITS_V1,
+    });
+    assert.strictEqual(thrown.ok, false);
+    if (!thrown.ok) {
+      assert.strictEqual(thrown.category, 'backend_failure');
+      assert.strictEqual(thrown.reason, 'replay_store_unavailable');
+    }
+
+    // Anything other than a definite admission fails closed rather than being
+    // treated as a pass.
+    const indefinite = profile('project-single-use-jwt-v1', {
+      admit: () => Promise.resolve('unavailable'),
+    });
+    const result = await validateJwt(await signed(indefinite, claims), {
+      profile: indefinite.profile,
+      limits: LIMITS_V1,
+    });
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'backend_failure');
+      assert.strictEqual(result.reason, 'replay_store_unavailable');
     }
   });
 });

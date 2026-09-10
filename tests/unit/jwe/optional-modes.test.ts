@@ -591,3 +591,193 @@ describe('compression is disabled', () => {
     }
   });
 });
+
+/** Rewrites the protected header of a serialized object. */
+function withHeader(serialized: string, members: Record<string, unknown>): string {
+  const parsed = JSON.parse(serialized) as Record<string, unknown>;
+  const header = JSON.parse(Buffer.from(parsed['protected'] as string, 'base64url').toString('utf8')) as Record<
+    string,
+    unknown
+  >;
+  const merged: Record<string, unknown> = { ...header, ...members };
+  for (const [name, value] of Object.entries(members)) {
+    if (value === undefined) {
+      delete merged[name];
+    }
+  }
+  return JSON.stringify({
+    ...parsed,
+    protected: Buffer.from(JSON.stringify(merged)).toString('base64url'),
+  });
+}
+
+function assertHeaderFailure(result: Awaited<ReturnType<typeof decrypt>>, reason: string): void {
+  assert.strictEqual(result.ok, false);
+  if (!result.ok) {
+    assert.strictEqual(result.stage, 'header');
+    assert.strictEqual(result.reason, reason);
+  }
+}
+
+describe('GCM key-wrap and PBES2 header validation', () => {
+  async function gcmKwObject() {
+    const pair = gcmKwPair('A256GCMKW', 32);
+    const result = await encryptJson(PLAINTEXT, {
+      keyPolicy: AlgorithmPolicy.create('jwe_alg', ['A256GCMKW'], 'create'),
+      contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128GCM'], 'create'),
+      contentAlgorithm: 'A128GCM',
+      recipients: [{ key: pair.encryption, keyIdentity: pair.keyIdentity }],
+      limits: LIMITS_V1,
+      random: systemRandom,
+      nonceAllocator: trackingAllocator(),
+    });
+    if (!result.ok) {
+      throw new Error(`encrypt failed: ${result.reason}`);
+    }
+    return { serialized: result.value, trusted: [{ principalId: 'a', key: pair.decryption }] };
+  }
+
+  test('requires both wrapping parameters to be present', async () => {
+    const { serialized, trusted } = await gcmKwObject();
+
+    for (const member of ['iv', 'tag'] as const) {
+      const result = await decrypt(withHeader(serialized, { [member]: undefined }), trusted, 'A256GCMKW');
+      assertHeaderFailure(result, 'gcmkw_parameters_missing');
+    }
+  });
+
+  test('requires both wrapping parameters to decode at their fixed widths', async () => {
+    const { serialized, trusted } = await gcmKwObject();
+
+    for (const member of ['iv', 'tag'] as const) {
+      const invalid = await decrypt(withHeader(serialized, { [member]: 'not base64url!' }), trusted, 'A256GCMKW');
+      assertHeaderFailure(invalid, 'gcmkw_parameters_invalid_base64url');
+
+      // Both widths are fixed by the construction, so a different width means
+      // the object does not describe the algorithm it names.
+      const short = await decrypt(
+        withHeader(serialized, { [member]: Buffer.alloc(4, 1).toString('base64url') }),
+        trusted,
+        'A256GCMKW',
+      );
+      assertHeaderFailure(short, 'gcmkw_parameters_wrong_length');
+    }
+  });
+});
+
+describe('PBES2 derivation header validation', () => {
+  const PASSWORD = new TextEncoder().encode('correct horse battery staple');
+
+  async function pbes2Object() {
+    const algorithm = 'PBES2-HS256+A128KW';
+    const saltInput = new Uint8Array(16).fill(3);
+    const cek = new Uint8Array(randomBytes(16));
+
+    const kek = await derivePbes2Key(algorithm, PASSWORD, saltInput, MIN_ITERATIONS);
+    if (!kek.ok) {
+      throw new Error('derive failed');
+    }
+    const wrapped = await wrapAesKw('A128KW', kek.value, cek);
+    if (!wrapped.ok) {
+      throw new Error('wrap failed');
+    }
+
+    const header = { alg: algorithm, enc: 'A128GCM', p2s: encodeBase64url(saltInput), p2c: MIN_ITERATIONS };
+    const protectedComponent = encodeBase64url(new TextEncoder().encode(JSON.stringify(header)));
+
+    const iv = new Uint8Array(randomBytes(12));
+    const handle = await crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['encrypt']);
+    const sealed = new Uint8Array(
+      await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(protectedComponent), tagLength: 128 },
+        handle,
+        PLAINTEXT,
+      ),
+    );
+
+    return JSON.stringify({
+      protected: protectedComponent,
+      encrypted_key: encodeBase64url(wrapped.value),
+      iv: encodeBase64url(iv),
+      ciphertext: encodeBase64url(sealed.subarray(0, PLAINTEXT.length)),
+      tag: encodeBase64url(sealed.subarray(PLAINTEXT.length)),
+    });
+  }
+
+  function trustedPassword() {
+    const jwk = { kty: 'oct', k: encodeBase64url(new Uint8Array(16)) };
+    return [
+      {
+        principalId: 'alice',
+        key: key(jwk, 'PBES2-HS256+A128KW', 'unwrapKey'),
+        password: PASSWORD,
+      },
+    ];
+  }
+
+  async function decryptPbes2(serialized: string) {
+    return decrypt(serialized, trustedPassword(), 'PBES2-HS256+A128KW');
+  }
+
+  test('requires the salt and count members to be present and correctly typed', async () => {
+    const serialized = await pbes2Object();
+
+    const noSalt = await decryptPbes2(withHeader(serialized, { p2s: undefined }));
+    assert.strictEqual(noSalt.ok, false);
+    if (!noSalt.ok) {
+      assert.strictEqual(noSalt.reason, 'p2s_missing_or_not_a_string');
+    }
+
+    const noCount = await decryptPbes2(withHeader(serialized, { p2c: undefined }));
+    assert.strictEqual(noCount.ok, false);
+    if (!noCount.ok) {
+      assert.strictEqual(noCount.reason, 'p2c_missing_or_not_a_number');
+    }
+  });
+
+  test('requires the iteration count to be written as a plain integer', async () => {
+    const serialized = await pbes2Object();
+
+    // The lexeme is what is checked, not the parsed value: a count written as
+    // `1e9` names a work factor far outside policy while looking small, and a
+    // fractional count has no meaning for the derivation. The exponent form is
+    // spliced in literally because `JSON.stringify` would normalize it away.
+    for (const lexeme of ['1.5', '1e9', '-1']) {
+      const parsed = JSON.parse(serialized) as Record<string, unknown>;
+      const header = Buffer.from(parsed['protected'] as string, 'base64url').toString('utf8');
+      const rewritten = header.replace(/"p2c":\d+/, `"p2c":${lexeme}`);
+      const rebuilt = JSON.stringify({
+        ...parsed,
+        protected: Buffer.from(rewritten).toString('base64url'),
+      });
+
+      const result = await decryptPbes2(rebuilt);
+      assert.strictEqual(result.ok, false);
+      if (!result.ok) {
+        assert.strictEqual(result.reason, 'p2c_not_a_positive_integer');
+      }
+    }
+  });
+
+  test('rejects a salt that is not decodable base64url', async () => {
+    const serialized = await pbes2Object();
+
+    const result = await decryptPbes2(withHeader(serialized, { p2s: 'not base64url!' }));
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'invalid_encoding');
+      assert.strictEqual(result.reason, 'p2s_invalid_base64url');
+    }
+  });
+
+  test('refuses an out-of-policy work factor before any derivation runs', async () => {
+    const serialized = await pbes2Object();
+
+    // A hostile count never costs this side the work it names.
+    const result = await decryptPbes2(withHeader(serialized, { p2c: 1 }));
+    assert.strictEqual(result.ok, false);
+    if (!result.ok) {
+      assert.strictEqual(result.category, 'policy_violation');
+    }
+  });
+});
