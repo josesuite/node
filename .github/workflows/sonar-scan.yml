@@ -8,7 +8,7 @@ on:
     - cron: '0 0 * * 1'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: sonar-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
