@@ -12,9 +12,9 @@
  * output is verified against the RFC 3394 test vectors.
  */
 
-import { createCipheriv, createSecretKey } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createSecretKey } from 'node:crypto';
 
-import { ownedBytes, toBufferSource } from '../../internal/bytes.ts';
+import { ownedBytes } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
 
 /** Bytes RFC 3394 adds to the wrapped output. */
@@ -42,10 +42,6 @@ export function aesKwKeySize(algorithm: string): number | undefined {
  * the integrity check is bound to exactly these octets.
  */
 const DEFAULT_IV = new Uint8Array([0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6]);
-
-async function importKek(kek: Uint8Array, usage: 'wrapKey' | 'unwrapKey'): Promise<CryptoKey> {
-  return crypto.subtle.importKey('raw', toBufferSource(kek), 'AES-KW', false, [usage]);
-}
 
 export async function wrapAesKw(
   algorithm: string,
@@ -90,11 +86,11 @@ export async function unwrapAesKw(
   kek: Uint8Array,
   wrapped: Uint8Array,
 ): Promise<BackendResult<Uint8Array | undefined>> {
-  const kekBytes = aesKwKeySize(algorithm);
-  if (kekBytes === undefined) {
+  const parameters = KW_ALGORITHMS[algorithm];
+  if (parameters === undefined) {
     return backendError('unsupported');
   }
-  if (kek.length !== kekBytes) {
+  if (kek.length !== parameters.kekBytes) {
     return backendError('operation_failed');
   }
   // Length is public, so a wrapped value that cannot have come from this
@@ -103,29 +99,20 @@ export async function unwrapAesKw(
     return backendOk(undefined);
   }
 
-  let unwrappingKey: CryptoKey;
+  let decipher;
   try {
-    unwrappingKey = await importKek(kek, 'unwrapKey');
+    decipher = createDecipheriv(parameters.cipher, createSecretKey(kek), DEFAULT_IV);
   } catch {
+    // Constructing the cipher is an operational step with no cryptographic
+    // outcome; a rejection here means the provider is unusable.
     return backendError('operation_failed');
   }
 
   try {
-    // `unwrapKey` verifies the integrity octets and rejects when they do not
-    // match, which is the expected path for a wrong key. The recovered key is
-    // imported as extractable so its octets can be returned; it is raw key
-    // material to this layer, not a usable algorithm key.
-    const recovered = await crypto.subtle.unwrapKey(
-      'raw',
-      toBufferSource(wrapped),
-      unwrappingKey,
-      'AES-KW',
-      { name: 'HMAC', hash: 'SHA-256' },
-      true,
-      ['sign'],
-    );
-
-    return backendOk(new Uint8Array(await crypto.subtle.exportKey('raw', recovered)));
+    // The cipher verifies the integrity octets and throws when they do not
+    // match, which is the expected path for a wrong key. Nothing is released
+    // until the whole unwrap has completed.
+    return backendOk(ownedBytes(Buffer.concat([decipher.update(wrapped), decipher.final()])));
   } catch {
     return backendOk(undefined);
   }
