@@ -6,31 +6,36 @@
  * have to be read from somewhere, offering it would let the object influence
  * how strictly it is checked.
  *
- * WebCrypto returns the tag appended to the ciphertext and expects the same on
- * decryption, whereas JWE carries them as separate components. Splitting and
- * rejoining happens here so the rest of the library works in the wire layout.
- *
  * Nonces are supplied by the caller's allocator rather than generated here.
  * GCM fails catastrophically on nonce reuse under one key. Two messages sharing
  * a nonce leak their plaintext difference and the authentication subkey, so
  * uniqueness has to be enforced by durable state that outlives this function.
+ *
+ * Encryption runs synchronously through `node:crypto`. For JWE-sized inputs
+ * the cipher work is a few microseconds, below the fixed cost of an
+ * asynchronous provider dispatch, and the cipher exposes the tag as its own
+ * value, which is the JWE wire layout.
  */
 
-import { toBufferSource } from '../../internal/bytes.ts';
+import { type CipherGCMTypes, createCipheriv, createSecretKey } from 'node:crypto';
+
+import { ownedBytes, toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
 import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
 
 export interface GcmParameters {
   readonly keyBytes: number;
+  /** Native cipher name. */
+  readonly cipher: CipherGCMTypes;
 }
 
 export const GCM_IV_BYTES = 12;
 export const GCM_TAG_BYTES = 16;
 
 const GCM_ALGORITHMS: Readonly<Record<string, GcmParameters>> = Object.freeze({
-  A128GCM: { keyBytes: 16 },
-  A192GCM: { keyBytes: 24 },
-  A256GCM: { keyBytes: 32 },
+  A128GCM: { keyBytes: 16, cipher: 'aes-128-gcm' },
+  A192GCM: { keyBytes: 24, cipher: 'aes-192-gcm' },
+  A256GCM: { keyBytes: 32, cipher: 'aes-256-gcm' },
 });
 
 export function gcmParameters(algorithm: string): GcmParameters | undefined {
@@ -66,33 +71,25 @@ export async function sealGcm(
     return backendError('operation_failed');
   }
 
-  const result = await attempt(async () => {
-    const handle = await importRaw(key, { name: 'AES-GCM', length: parameters.keyBytes * 8 }, ['encrypt']);
-    return crypto.subtle.encrypt(
-      {
-        name: 'AES-GCM',
-        iv: toBufferSource(iv),
-        additionalData: toBufferSource(additionalData),
-        tagLength: GCM_TAG_BYTES * 8,
-      },
-      handle,
-      toBufferSource(plaintext),
-    );
-  });
+  try {
+    // Key material is supplied as a `KeyObject`; passing raw octets triggers a
+    // per-call provider fetch on some supported releases.
+    const cipher = createCipheriv(parameters.cipher, createSecretKey(key), iv, { authTagLength: GCM_TAG_BYTES });
+    cipher.setAAD(additionalData);
+    // GCM is a stream mode, so `update` yields every ciphertext octet and
+    // `final` only completes the tag.
+    const ciphertext = cipher.update(plaintext);
+    cipher.final();
+    const tag = cipher.getAuthTag();
 
-  if (!result.ok) {
-    return result;
-  }
+    if (ciphertext.length !== plaintext.length || tag.length !== GCM_TAG_BYTES) {
+      return backendError('operation_failed');
+    }
 
-  const combined = new Uint8Array(result.value);
-  if (combined.length !== plaintext.length + GCM_TAG_BYTES) {
+    return backendOk({ ciphertext: ownedBytes(ciphertext), tag: ownedBytes(tag) });
+  } catch {
     return backendError('operation_failed');
   }
-
-  return backendOk({
-    ciphertext: combined.subarray(0, plaintext.length),
-    tag: combined.subarray(plaintext.length),
-  });
 }
 
 /**
