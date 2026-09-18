@@ -13,6 +13,7 @@ import {
   verify,
 } from 'node:crypto';
 
+import { openCbcHmac, sealCbcHmac } from '../../../src/algorithms/content-encryption/aes-cbc-hmac.ts';
 import { openGcm, sealGcm } from '../../../src/algorithms/content-encryption/aes-gcm.ts';
 
 import { constantTime } from '../../../src/internal/crypto/constant-time.ts';
@@ -316,6 +317,38 @@ describe('native backend selection', () => {
       assert.deepStrictEqual(sealed.value.tag, combined.subarray(plaintext.length), algorithm);
 
       const opened = await openGcm(algorithm, key, iv, sealed.value.ciphertext, sealed.value.tag, aad);
+      assert.ok(opened.ok);
+      assert.deepStrictEqual(opened.value, plaintext, algorithm);
+    }
+  });
+
+  test('AES-CBC-HMAC through the native module matches WebCrypto octet for octet', async () => {
+    const plaintext = new Uint8Array(randomBytes(77));
+    const aad = new TextEncoder().encode('eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0');
+    for (const [algorithm, hash, keyBytes, tagBytes] of [
+      ['A128CBC-HS256', 'SHA-256', 32, 16],
+      ['A192CBC-HS384', 'SHA-384', 48, 24],
+      ['A256CBC-HS512', 'SHA-512', 64, 32],
+    ] as const) {
+      const key = new Uint8Array(randomBytes(keyBytes));
+      const iv = new Uint8Array(randomBytes(16));
+      const macKey = key.slice(0, keyBytes / 2);
+      const encryptionKey = key.slice(keyBytes / 2);
+
+      const cbc = await crypto.subtle.importKey('raw', encryptionKey, { name: 'AES-CBC' }, false, ['encrypt']);
+      const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, cbc, plaintext));
+      const length = new Uint8Array(8);
+      new DataView(length.buffer).setBigUint64(0, BigInt(aad.length) * 8n);
+      const message = new Uint8Array([...aad, ...iv, ...ciphertext, ...length]);
+      const mac = await crypto.subtle.importKey('raw', macKey, { name: 'HMAC', hash }, false, ['sign']);
+      const tag = new Uint8Array(await crypto.subtle.sign('HMAC', mac, message)).subarray(0, tagBytes);
+
+      const sealed = await sealCbcHmac(algorithm, key, iv, plaintext, aad);
+      assert.ok(sealed.ok, algorithm);
+      assert.deepStrictEqual(sealed.value.ciphertext, ciphertext, algorithm);
+      assert.deepStrictEqual(sealed.value.tag, tag, algorithm);
+
+      const opened = await openCbcHmac(algorithm, key, iv, ciphertext, tag, aad);
       assert.ok(opened.ok);
       assert.deepStrictEqual(opened.value, plaintext, algorithm);
     }
