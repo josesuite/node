@@ -482,6 +482,12 @@ describe('ECDH-ES agreement', () => {
       }
     });
 
+    test(`${curve} sender rejects a low-order recipient point`, async () => {
+      const recipient = okpMaterial(curve);
+      const result = await agreeEphemeral({ curve, x: new Uint8Array(recipient.x.length) });
+      assert.strictEqual(result.ok, false);
+    });
+
     test(`${curve} rejects an all-zero agreement result`, async () => {
       // A low-order peer point forces the same secret regardless of the private
       // key, letting anyone derive the CEK.
