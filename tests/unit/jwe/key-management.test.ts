@@ -12,13 +12,7 @@ import {
 } from '../../../src/algorithms/jwe/aes-kw.ts';
 import { concatKdf } from '../../../src/algorithms/jwe/concat-kdf.ts';
 import { directCek } from '../../../src/algorithms/jwe/direct.ts';
-import {
-  agree,
-  agreementFieldBytes,
-  generateEphemeralEc,
-  generateEphemeralOkp,
-  isAgreementCurve,
-} from '../../../src/algorithms/jwe/ecdh-es.ts';
+import { agree, agreeEphemeral, agreementFieldBytes, isAgreementCurve } from '../../../src/algorithms/jwe/ecdh-es.ts';
 import { decryptRsaOaep, encryptRsaOaep, oaepHash } from '../../../src/algorithms/jwe/rsaes-oaep.ts';
 import type { EcMaterial, OkpMaterial, RsaPrivateMaterial } from '../../../src/key/validation.ts';
 import { flipBit, supportsCurve } from '../../helpers/runtime.ts';
@@ -385,35 +379,40 @@ describe('ECDH-ES agreement', () => {
   for (const curve of EC_CURVES) {
     test(`${curve} produces the same secret for both parties`, async () => {
       const recipient = ecMaterial(curve);
-      const ephemeral = await generateEphemeralEc(curve);
-      assert.strictEqual(ephemeral.ok, true);
-      if (!ephemeral.ok) {
+      const senderSide = await agreeEphemeral({ curve, x: recipient.x, y: recipient.y });
+      assert.strictEqual(senderSide.ok, true);
+      if (!senderSide.ok) {
         return;
       }
+      const epk = senderSide.value.ephemeralPublicKey;
+      assert.strictEqual(epk.curve, curve);
+      assert.strictEqual(epk.x.length, agreementFieldBytes(curve)!);
+      assert.strictEqual(epk.y?.length, agreementFieldBytes(curve)!);
 
-      const senderSide = await agree(
-        { curve, x: ephemeral.value.x, y: ephemeral.value.y, d: ephemeral.value.d } as EcMaterial,
-        { curve, x: recipient.x, y: recipient.y },
-      );
-      const recipientSide = await agree(recipient, { curve, x: ephemeral.value.x, y: ephemeral.value.y });
-
-      assert.strictEqual(senderSide.ok && recipientSide.ok, true);
-      if (senderSide.ok && recipientSide.ok) {
-        assert.deepStrictEqual(senderSide.value, recipientSide.value);
-        assert.strictEqual(senderSide.value.length, agreementFieldBytes(curve)!);
+      // The recipient reproduces the agreement from the published `epk` and,
+      // on a second pass, from the memoized handle for its key record.
+      const token = {};
+      for (let pass = 0; pass < 2; pass += 1) {
+        const recipientSide = await agree(recipient, { curve, x: epk.x, y: epk.y }, token);
+        assert.strictEqual(recipientSide.ok, true, `pass ${pass}`);
+        if (recipientSide.ok) {
+          assert.deepStrictEqual(recipientSide.value, senderSide.value.secret);
+          assert.strictEqual(recipientSide.value.length, agreementFieldBytes(curve)!);
+        }
       }
     });
 
     test(`${curve} generates a fresh ephemeral key each time`, async () => {
       // A reused ephemeral key would derive one CEK for every message, which is
       // the failure the ephemeral half exists to prevent.
-      const first = await generateEphemeralEc(curve);
-      const second = await generateEphemeralEc(curve);
+      const recipient = ecMaterial(curve);
+      const first = await agreeEphemeral({ curve, x: recipient.x, y: recipient.y });
+      const second = await agreeEphemeral({ curve, x: recipient.x, y: recipient.y });
 
       assert.strictEqual(first.ok && second.ok, true);
       if (first.ok && second.ok) {
-        assert.notDeepStrictEqual(first.value.d, second.value.d);
-        assert.notDeepStrictEqual(first.value.x, second.value.x);
+        assert.notDeepStrictEqual(first.value.ephemeralPublicKey.x, second.value.ephemeralPublicKey.x);
+        assert.notDeepStrictEqual(first.value.secret, second.value.secret);
       }
     });
 
@@ -438,22 +437,22 @@ describe('ECDH-ES agreement', () => {
   for (const curve of XDH_CURVES) {
     test(`${curve} produces the same secret for both parties`, async () => {
       const recipient = okpMaterial(curve);
-      const ephemeral = await generateEphemeralOkp(curve);
-      assert.strictEqual(ephemeral.ok, true);
-      if (!ephemeral.ok) {
+      const senderSide = await agreeEphemeral({ curve, x: recipient.x });
+      assert.strictEqual(senderSide.ok, true);
+      if (!senderSide.ok) {
         return;
       }
+      const epk = senderSide.value.ephemeralPublicKey;
+      assert.strictEqual(epk.y, undefined);
 
-      const senderSide = await agree({ curve, x: ephemeral.value.x, d: ephemeral.value.d } as OkpMaterial, {
-        curve,
-        x: recipient.x,
-      });
-      const recipientSide = await agree(recipient, { curve, x: ephemeral.value.x });
-
-      assert.strictEqual(senderSide.ok && recipientSide.ok, true);
-      if (senderSide.ok && recipientSide.ok) {
-        assert.deepStrictEqual(senderSide.value, recipientSide.value);
-        assert.strictEqual(senderSide.value.length, agreementFieldBytes(curve)!);
+      const token = {};
+      for (let pass = 0; pass < 2; pass += 1) {
+        const recipientSide = await agree(recipient, { curve, x: epk.x }, token);
+        assert.strictEqual(recipientSide.ok, true, `pass ${pass}`);
+        if (recipientSide.ok) {
+          assert.deepStrictEqual(recipientSide.value, senderSide.value.secret);
+          assert.strictEqual(recipientSide.value.length, agreementFieldBytes(curve)!);
+        }
       }
     });
 
@@ -487,25 +486,20 @@ describe('ECDH-ES agreement', () => {
     // Direct mode feeds `enc` to the KDF and wrapped mode feeds `alg`, so the
     // same agreement must not produce the same key for both.
     const recipient = ecMaterial('P-256');
-    const ephemeral = await generateEphemeralEc('P-256');
-    if (!ephemeral.ok) {
-      throw new Error('generate failed');
-    }
-
-    const secret = await agree(recipient, { curve: 'P-256', x: ephemeral.value.x, y: ephemeral.value.y });
+    const secret = await agreeEphemeral({ curve: 'P-256', x: recipient.x, y: recipient.y });
     if (!secret.ok) {
       throw new Error('agree failed');
     }
 
     const encoder = new TextEncoder();
     const empty = new Uint8Array(0);
-    const direct = concatKdf(secret.value, {
+    const direct = concatKdf(secret.value.secret, {
       algorithmId: encoder.encode('A128GCM'),
       partyUInfo: empty,
       partyVInfo: empty,
       keyBytes: 16,
     });
-    const wrapped = concatKdf(secret.value, {
+    const wrapped = concatKdf(secret.value.secret, {
       algorithmId: encoder.encode('ECDH-ES+A128KW'),
       partyUInfo: empty,
       partyVInfo: empty,
