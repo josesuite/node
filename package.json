@@ -33,15 +33,16 @@
     "format:fix": "oxfmt",
     "build": "tsc",
     "test": "node --test",
+    "test_legacy": "bunx tsx --test $(find tests -type f -name '*.test.ts')",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-reporter=lcov --test-reporter-destination=lcov.info"
   },
   "devDependencies": {
-    "@types/node": "^26.5.1",
-    "oxfmt": "^0.67.0",
-    "oxlint": "^1.82.0",
+    "@types/node": "^26.6.1",
+    "oxfmt": "^0.68.0",
+    "oxlint": "^1.83.0",
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=20.20.0 <21 || ^22.11.0 || ^24.11.0 || ^26.0.0"
+    "node": ">=20.10.0"
   }
 }
