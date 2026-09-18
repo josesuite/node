@@ -12,12 +12,15 @@
  * from one key so the two operations cannot be given independently chosen keys.
  */
 
+import { createHmac, createSecretKey } from 'node:crypto';
+
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
 import { constantTime } from '../../internal/crypto/constant-time.ts';
 import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
 
 export interface CbcHmacParameters {
+  /** Native digest name. */
   readonly hash: string;
   readonly keyBytes: number;
   readonly tagBytes: number;
@@ -26,9 +29,9 @@ export interface CbcHmacParameters {
 export const CBC_IV_BYTES = 16;
 
 const CBC_HMAC_ALGORITHMS: Readonly<Record<string, CbcHmacParameters>> = Object.freeze({
-  'A128CBC-HS256': { hash: 'SHA-256', keyBytes: 32, tagBytes: 16 },
-  'A192CBC-HS384': { hash: 'SHA-384', keyBytes: 48, tagBytes: 24 },
-  'A256CBC-HS512': { hash: 'SHA-512', keyBytes: 64, tagBytes: 32 },
+  'A128CBC-HS256': { hash: 'sha256', keyBytes: 32, tagBytes: 16 },
+  'A192CBC-HS384': { hash: 'sha384', keyBytes: 48, tagBytes: 24 },
+  'A256CBC-HS512': { hash: 'sha512', keyBytes: 64, tagBytes: 32 },
 });
 
 export function cbcHmacParameters(algorithm: string): CbcHmacParameters | undefined {
@@ -49,32 +52,30 @@ function additionalDataLength(additionalData: Uint8Array): Uint8Array {
   return encoded;
 }
 
-async function computeTag(
+function computeTag(
   parameters: CbcHmacParameters,
   macKey: Uint8Array,
   iv: Uint8Array,
   ciphertext: Uint8Array,
   additionalData: Uint8Array,
-): Promise<BackendResult<Uint8Array>> {
-  const message = new Uint8Array(additionalData.length + iv.length + ciphertext.length + 8);
-  let offset = 0;
-  for (const part of [additionalData, iv, ciphertext, additionalDataLength(additionalData)]) {
-    message.set(part, offset);
-    offset += part.length;
-  }
-
-  const result = await attempt(async () => {
-    const handle = await importRaw(macKey, { name: 'HMAC', hash: parameters.hash }, ['sign']);
-    return crypto.subtle.sign('HMAC', handle, toBufferSource(message));
-  });
-
-  if (!result.ok) {
-    return result;
+): BackendResult<Uint8Array> {
+  let digest: Buffer;
+  try {
+    // Key material is supplied as a `KeyObject`; passing raw octets triggers a
+    // per-call provider fetch on some supported releases.
+    digest = createHmac(parameters.hash, createSecretKey(macKey))
+      .update(additionalData)
+      .update(iv)
+      .update(ciphertext)
+      .update(additionalDataLength(additionalData))
+      .digest();
+  } catch {
+    return backendError('operation_failed');
   }
 
   // The leftmost half of the digest is the tag. This truncation is part of the
   // construction and fixed by the algorithm identifier, not a caller choice.
-  return backendOk(new Uint8Array(result.value).subarray(0, parameters.tagBytes));
+  return backendOk(new Uint8Array(digest.subarray(0, parameters.tagBytes)));
 }
 
 export interface CbcHmacSealed {
@@ -113,7 +114,7 @@ export async function sealCbcHmac(
   }
 
   const ciphertext = new Uint8Array(encrypted.value);
-  const tag = await computeTag(parameters, macKey, iv, ciphertext, additionalData);
+  const tag = computeTag(parameters, macKey, iv, ciphertext, additionalData);
   if (!tag.ok) {
     return tag;
   }
@@ -156,7 +157,7 @@ export async function openCbcHmac(
   const macKey = key.subarray(0, half);
   const encryptionKey = key.subarray(half);
 
-  const expected = await computeTag(parameters, macKey, iv, ciphertext, additionalData);
+  const expected = computeTag(parameters, macKey, iv, ciphertext, additionalData);
   if (!expected.ok) {
     return expected;
   }
