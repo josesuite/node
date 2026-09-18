@@ -8,8 +8,7 @@
  * producer signed.
  */
 
-import { concatBytes } from '../internal/bytes.ts';
-import { encodeAscii } from '../internal/encoding/ascii.ts';
+import { writeAscii } from '../internal/encoding/ascii.ts';
 import { encodeBase64url } from '../internal/encoding/base64url.ts';
 
 /**
@@ -81,22 +80,28 @@ export function buildSigningInput(
   protectedComponent: string,
   payload: { readonly component: string } | { readonly octets: Uint8Array },
 ): SigningInputResult {
-  const prefix = encodeAscii(`${protectedComponent}.`);
-  if (!prefix.ok) {
+  // The result is assembled directly into one allocation of its final size;
+  // allocating an external backing store is the dominant cost at these sizes.
+  const prefixLength = protectedComponent.length + 1;
+  const payloadLength = 'component' in payload ? payload.component.length : payload.octets.length;
+  const bytes = new Uint8Array(prefixLength + payloadLength);
+
+  if (!writeAscii(protectedComponent, bytes, 0)) {
     return { ok: false, failure: 'non_ascii_component' };
   }
+  bytes[protectedComponent.length] = 0x2e;
 
   if ('component' in payload) {
-    const encoded = encodeAscii(payload.component);
-    if (!encoded.ok) {
+    if (!writeAscii(payload.component, bytes, prefixLength)) {
       return { ok: false, failure: 'non_ascii_component' };
     }
-    return { ok: true, bytes: concatBytes(prefix.bytes, encoded.bytes) };
+    return { ok: true, bytes };
   }
 
   // Unencoded mode appends the payload octets directly after the period,
   // with no Base64url layer in between.
-  return { ok: true, bytes: concatBytes(prefix.bytes, payload.octets) };
+  bytes.set(payload.octets, prefixLength);
+  return { ok: true, bytes };
 }
 
 /**
