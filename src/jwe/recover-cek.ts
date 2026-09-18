@@ -116,7 +116,7 @@ export async function recoverCek(input: RecoverInput): Promise<CekRecovery> {
       if (material.d === undefined) {
         return FAILED;
       }
-      const decrypted = await decryptRsaOaep(input.keyAlgorithm, material, input.encryptedKey);
+      const decrypted = await decryptRsaOaep(input.keyAlgorithm, material, input.encryptedKey, input.key);
       if (!decrypted.ok) {
         return decrypted.failure === 'unsupported' ? FAILED : BACKEND;
       }
