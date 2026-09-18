@@ -7,34 +7,39 @@
  * released. There is no padded variant here, because substituting one would
  * change which lengths are accepted.
  *
- * This uses WebCrypto rather than the provider's cipher list. The supported
- * backends differ: one exposes an `aes256-wrap` cipher
- * and the other exposes none at all, so a cipher-based implementation would
- * leave a required capability unavailable on a supported runtime. WebCrypto
- * implements the same construction on both and was verified to produce
- * byte-identical output. The cost is that wrapping is asynchronous.
+ * Wrapping uses the provider's `id-aes*-wrap` ciphers, which every supported
+ * runtime exposes and which back the runtime's own AES-KW implementation. The
+ * output is verified against the RFC 3394 test vectors.
  */
 
-import { toBufferSource } from '../../internal/bytes.ts';
+import { createCipheriv, createSecretKey } from 'node:crypto';
+
+import { ownedBytes, toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
 
 /** Bytes RFC 3394 adds to the wrapped output. */
 export const KW_OVERHEAD_BYTES = 8;
 
-const KEK_SIZES: Readonly<Record<string, number>> = Object.freeze({
-  A128KW: 16,
-  A192KW: 24,
-  A256KW: 32,
+interface KwParameters {
+  readonly kekBytes: number;
+  /** Native cipher name; the `id-` spelling is present on every supported line. */
+  readonly cipher: string;
+}
+
+const KW_ALGORITHMS: Readonly<Record<string, KwParameters>> = Object.freeze({
+  A128KW: { kekBytes: 16, cipher: 'id-aes128-wrap' },
+  A192KW: { kekBytes: 24, cipher: 'id-aes192-wrap' },
+  A256KW: { kekBytes: 32, cipher: 'id-aes256-wrap' },
 });
 
 /** KEK size the identifier requires, or `undefined` when it names no wrapping. */
 export function aesKwKeySize(algorithm: string): number | undefined {
-  return KEK_SIZES[algorithm];
+  return KW_ALGORITHMS[algorithm]?.kekBytes;
 }
 
 /**
- * The initial value RFC 3394 fixes. WebCrypto applies it internally and offers
- * no way to override it, which is the behaviour this library wants.
+ * The initial value RFC 3394 fixes, supplied explicitly as the cipher's IV so
+ * the integrity check is bound to exactly these octets.
  */
 const DEFAULT_IV = new Uint8Array([0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6]);
 
@@ -47,11 +52,11 @@ export async function wrapAesKw(
   kek: Uint8Array,
   cek: Uint8Array,
 ): Promise<BackendResult<Uint8Array>> {
-  const kekBytes = aesKwKeySize(algorithm);
-  if (kekBytes === undefined) {
+  const parameters = KW_ALGORITHMS[algorithm];
+  if (parameters === undefined) {
     return backendError('unsupported');
   }
-  if (kek.length !== kekBytes) {
+  if (kek.length !== parameters.kekBytes) {
     return backendError('operation_failed');
   }
   // RFC 3394 operates on whole 64-bit blocks and requires at least two of them.
@@ -60,14 +65,8 @@ export async function wrapAesKw(
   }
 
   try {
-    const wrappingKey = await importKek(kek, 'wrapKey');
-    // The CEK is imported under a placeholder type purely so it can be handed
-    // to `wrapKey`; wrapping treats it as opaque octets, and the type carries
-    // no meaning for the wrapped bytes.
-    const target = await crypto.subtle.importKey('raw', toBufferSource(cek), { name: 'HMAC', hash: 'SHA-256' }, true, [
-      'sign',
-    ]);
-    const wrapped = new Uint8Array(await crypto.subtle.wrapKey('raw', target, wrappingKey, 'AES-KW'));
+    const cipher = createCipheriv(parameters.cipher, createSecretKey(kek), DEFAULT_IV);
+    const wrapped = ownedBytes(Buffer.concat([cipher.update(cek), cipher.final()]));
 
     if (wrapped.length !== cek.length + KW_OVERHEAD_BYTES) {
       return backendError('operation_failed');
