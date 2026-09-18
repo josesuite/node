@@ -416,6 +416,26 @@ describe('ECDH-ES agreement', () => {
       }
     });
 
+    test(`${curve} sender still generates fresh ephemeral keys under a memoized recipient handle`, async () => {
+      // The token memoizes only the recipient's public import. The ephemeral
+      // half must remain fresh on every call regardless.
+      const recipient = ecMaterial(curve);
+      const token = {};
+      const first = await agreeEphemeral({ curve, x: recipient.x, y: recipient.y }, token);
+      const second = await agreeEphemeral({ curve, x: recipient.x, y: recipient.y }, token);
+      assert.strictEqual(first.ok && second.ok, true);
+      if (first.ok && second.ok) {
+        assert.notDeepStrictEqual(first.value.ephemeralPublicKey.x, second.value.ephemeralPublicKey.x);
+        assert.notDeepStrictEqual(first.value.secret, second.value.secret);
+        const epk = second.value.ephemeralPublicKey;
+        const recipientSide = await agree(recipient, { curve, x: epk.x, y: epk.y });
+        assert.strictEqual(recipientSide.ok, true);
+        if (recipientSide.ok) {
+          assert.deepStrictEqual(recipientSide.value, second.value.secret);
+        }
+      }
+    });
+
     test(`${curve} rejects an off-curve peer point`, async () => {
       const recipient = ecMaterial(curve);
       const offCurve = flipBit(recipient.x, 0, 0xff);
