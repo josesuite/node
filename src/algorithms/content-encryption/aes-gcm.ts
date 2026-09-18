@@ -17,11 +17,10 @@
  * value, which is the JWE wire layout.
  */
 
-import { type CipherGCMTypes, createCipheriv, createSecretKey } from 'node:crypto';
+import { type CipherGCMTypes, createCipheriv, createDecipheriv, createSecretKey } from 'node:crypto';
 
-import { ownedBytes, toBufferSource } from '../../internal/bytes.ts';
+import { ownedBytes } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
 
 export interface GcmParameters {
   readonly keyBytes: number;
@@ -121,32 +120,27 @@ export async function openGcm(
     return backendOk(undefined);
   }
 
-  const combined = new Uint8Array(ciphertext.length + tag.length);
-  combined.set(ciphertext);
-  combined.set(tag, ciphertext.length);
-
-  const imported = await attempt(() =>
-    importRaw(key, { name: 'AES-GCM', length: parameters.keyBytes * 8 }, ['decrypt']),
-  );
-  if (!imported.ok) {
-    return imported;
-  }
+  let decipher;
   try {
-    const plaintext = await crypto.subtle.decrypt(
-      {
-        name: 'AES-GCM',
-        iv: toBufferSource(iv),
-        additionalData: toBufferSource(additionalData),
-        tagLength: GCM_TAG_BYTES * 8,
-      },
-      imported.value,
-      toBufferSource(combined),
-    );
-
-    return backendOk(new Uint8Array(plaintext));
+    decipher = createDecipheriv(parameters.cipher, createSecretKey(key), iv, { authTagLength: GCM_TAG_BYTES });
+    decipher.setAAD(additionalData);
+    decipher.setAuthTag(tag);
   } catch {
-    // The provider rejects the whole operation when the tag does not verify, so
-    // no partial plaintext is ever produced here.
+    // Constructing the cipher is an operational step with no cryptographic
+    // outcome; a rejection here means the provider is unusable.
+    return backendError('operation_failed');
+  }
+
+  // The provider streams provisional plaintext from `update` and checks the tag
+  // only in `final`. That output stays quarantined in this frame until the tag
+  // verifies; nothing reads it, and on failure it is cleared before returning.
+  const provisional = decipher.update(ciphertext);
+  try {
+    decipher.final();
+  } catch {
+    provisional.fill(0);
     return backendOk(undefined);
   }
+
+  return backendOk(ownedBytes(provisional));
 }
