@@ -203,7 +203,8 @@ async function protectFor(
       if (key.keyType !== 'RSA') {
         return { ok: false, failure: fail('incompatible_key', 'transport_requires_rsa_key') };
       }
-      const encrypted = await encryptRsaOaep(key.algorithm, key.material as RsaPublicMaterial, cek);
+      // The key record memoizes its provider handle across objects.
+      const encrypted = await encryptRsaOaep(key.algorithm, key.material as RsaPublicMaterial, cek, key);
       return encrypted.ok
         ? { ok: true, value: { encryptedKey: encrypted.value, ephemeralPublicKey: undefined, gcmKw: undefined } }
         : { ok: false, failure: fail('backend_failure', 'key_transport_failed') };
