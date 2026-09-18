@@ -7,6 +7,7 @@ import {
   createPublicKey,
   createSecretKey,
   generateKeyPairSync,
+  getCiphers,
   sign,
   verify,
 } from 'node:crypto';
@@ -277,5 +278,16 @@ describe('WebCrypto backend selection', () => {
     await assert.rejects(
       crypto.subtle.importKey('jwk', jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']),
     );
+  });
+});
+
+describe('native backend selection', () => {
+  test('exposes the RFC 3394 wrap cipher for every AES-KW size', () => {
+    // AES key wrapping runs on the provider's own wrap cipher; the runtime's
+    // WebCrypto is a wrapper over the same cipher and offers no fallback.
+    const ciphers = getCiphers();
+    for (const name of ['id-aes128-wrap', 'id-aes192-wrap', 'id-aes256-wrap']) {
+      assert.ok(ciphers.includes(name), name);
+    }
   });
 });
