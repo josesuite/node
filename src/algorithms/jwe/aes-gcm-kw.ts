@@ -16,24 +16,35 @@
  * GCM nonce reuse under one key is catastrophic. It leaks the plaintext
  * difference and the authentication subkey, so a wrapping nonce comes from the
  * caller's durable allocator, exactly as a content nonce does.
+ *
+ * Wrapping runs synchronously through `node:crypto`, as the GCM content
+ * encryption does: a 16- to 64-octet wrap completes well below the fixed cost
+ * of an asynchronous provider dispatch.
  */
 
-import { toBufferSource } from '../../internal/bytes.ts';
+import { type CipherGCMTypes, createCipheriv, createSecretKey } from 'node:crypto';
+
+import { ownedBytes, toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
+import { importRaw } from '../../internal/crypto/webcrypto.ts';
 
 export const GCMKW_IV_BYTES = 12;
 export const GCMKW_TAG_BYTES = 16;
 
-const KEK_SIZES: Readonly<Record<string, number>> = Object.freeze({
-  A128GCMKW: 16,
-  A192GCMKW: 24,
-  A256GCMKW: 32,
+interface GcmKwParameters {
+  readonly kekBytes: number;
+  readonly cipher: CipherGCMTypes;
+}
+
+const GCMKW_ALGORITHMS: Readonly<Record<string, GcmKwParameters>> = Object.freeze({
+  A128GCMKW: { kekBytes: 16, cipher: 'aes-128-gcm' },
+  A192GCMKW: { kekBytes: 24, cipher: 'aes-192-gcm' },
+  A256GCMKW: { kekBytes: 32, cipher: 'aes-256-gcm' },
 });
 
 /** KEK size the identifier requires, or `undefined` when it names no wrapping. */
 export function gcmKwKeySize(algorithm: string): number | undefined {
-  return KEK_SIZES[algorithm];
+  return GCMKW_ALGORITHMS[algorithm]?.kekBytes;
 }
 
 export interface GcmKwWrapped {
@@ -57,39 +68,29 @@ export async function wrapGcmKw(
   iv: Uint8Array,
   cek: Uint8Array,
 ): Promise<BackendResult<GcmKwWrapped>> {
-  const kekBytes = gcmKwKeySize(algorithm);
-  if (kekBytes === undefined) {
+  const parameters = GCMKW_ALGORITHMS[algorithm];
+  if (parameters === undefined) {
     return backendError('unsupported');
   }
-  if (kek.length !== kekBytes || iv.length !== GCMKW_IV_BYTES) {
+  if (kek.length !== parameters.kekBytes || iv.length !== GCMKW_IV_BYTES) {
     return backendError('operation_failed');
   }
 
-  const result = await attempt(async () => {
-    const handle = await importRaw(kek, { name: 'AES-GCM', length: kekBytes * 8 }, ['encrypt']);
+  try {
     // No additional data: the construction authenticates the CEK alone.
-    return crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: toBufferSource(iv), tagLength: GCMKW_TAG_BYTES * 8 },
-      handle,
-      toBufferSource(cek),
-    );
-  });
+    const cipher = createCipheriv(parameters.cipher, createSecretKey(kek), iv, { authTagLength: GCMKW_TAG_BYTES });
+    const encryptedKey = cipher.update(cek);
+    cipher.final();
+    const tag = cipher.getAuthTag();
 
-  if (!result.ok) {
-    return result;
-  }
+    if (encryptedKey.length !== cek.length || tag.length !== GCMKW_TAG_BYTES) {
+      return backendError('operation_failed');
+    }
 
-  // The provider appends the tag; JOSE carries the two separately.
-  const combined = new Uint8Array(result.value);
-  if (combined.length !== cek.length + GCMKW_TAG_BYTES) {
+    return backendOk({ encryptedKey: ownedBytes(encryptedKey), iv, tag: ownedBytes(tag) });
+  } catch {
     return backendError('operation_failed');
   }
-
-  return backendOk({
-    encryptedKey: combined.subarray(0, cek.length),
-    iv,
-    tag: combined.subarray(cek.length),
-  });
 }
 
 /**
