@@ -15,6 +15,7 @@ import {
 
 import { openCbcHmac, sealCbcHmac } from '../../../src/algorithms/content-encryption/aes-cbc-hmac.ts';
 import { openGcm, sealGcm } from '../../../src/algorithms/content-encryption/aes-gcm.ts';
+import { unwrapAesKw, wrapAesKw } from '../../../src/algorithms/jwe/aes-kw.ts';
 
 import { constantTime } from '../../../src/internal/crypto/constant-time.ts';
 import { deriveEcPublicPoint, deriveOkpPublicKey, validateEcPointOnCurve } from '../../../src/internal/crypto/node.ts';
@@ -351,6 +352,28 @@ describe('native backend selection', () => {
       const opened = await openCbcHmac(algorithm, key, iv, ciphertext, tag, aad);
       assert.ok(opened.ok);
       assert.deepStrictEqual(opened.value, plaintext, algorithm);
+    }
+  });
+
+  test('AES-KW through the native module matches WebCrypto octet for octet', async () => {
+    const cek = new Uint8Array(randomBytes(32));
+    for (const [algorithm, keyBytes] of [
+      ['A128KW', 16],
+      ['A192KW', 24],
+      ['A256KW', 32],
+    ] as const) {
+      const kek = new Uint8Array(randomBytes(keyBytes));
+      const wrapping = await crypto.subtle.importKey('raw', kek, 'AES-KW', false, ['wrapKey', 'unwrapKey']);
+      const target = await crypto.subtle.importKey('raw', cek, { name: 'HMAC', hash: 'SHA-256' }, true, ['sign']);
+      const expected = new Uint8Array(await crypto.subtle.wrapKey('raw', target, wrapping, 'AES-KW'));
+
+      const wrapped = await wrapAesKw(algorithm, kek, cek);
+      assert.ok(wrapped.ok, algorithm);
+      assert.deepStrictEqual(wrapped.value, expected, algorithm);
+
+      const unwrapped = await unwrapAesKw(algorithm, kek, expected);
+      assert.ok(unwrapped.ok);
+      assert.deepStrictEqual(unwrapped.value, cek, algorithm);
     }
   });
 });
