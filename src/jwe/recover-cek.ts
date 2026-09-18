@@ -116,7 +116,7 @@ export async function recoverCek(input: RecoverInput): Promise<CekRecovery> {
       if (material.d === undefined) {
         return FAILED;
       }
-      const decrypted = await decryptRsaOaep(input.keyAlgorithm, material, input.encryptedKey);
+      const decrypted = await decryptRsaOaep(input.keyAlgorithm, material, input.encryptedKey, input.key);
       if (!decrypted.ok) {
         return decrypted.failure === 'unsupported' ? FAILED : BACKEND;
       }
@@ -253,11 +253,17 @@ async function agreeWith(input: RecoverInput): Promise<Agreement> {
   }
 
   const material = input.key.material as EcMaterial | OkpMaterial;
-  const secret = await agree(material, {
-    curve: headers.ephemeral.curve,
-    x: headers.ephemeral.x,
-    y: headers.ephemeral.y,
-  });
+  // The key record is the memoization token for its provider handle, so the
+  // static private key is imported once per record.
+  const secret = await agree(
+    material,
+    {
+      curve: headers.ephemeral.curve,
+      x: headers.ephemeral.x,
+      y: headers.ephemeral.y,
+    },
+    input.key,
+  );
 
   if (secret.ok) {
     return { ok: true, secret: secret.value };

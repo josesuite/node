@@ -9,29 +9,57 @@
  * from what the caller believes was authenticated.
  */
 
-import { encodeUtf8 } from './utf8.ts';
-
 export type AsciiResult =
   | { readonly ok: true; readonly bytes: Uint8Array }
   | { readonly ok: false; readonly failure: 'non_ascii' };
 
-export function encodeAscii(input: string): AsciiResult {
-  // Native encoding pays off for longer components; the loop is faster for headers.
-  if (input.length >= 256) {
-    return /[\u0080-\uffff]/.test(input) ? { ok: false, failure: 'non_ascii' } : { ok: true, bytes: encodeUtf8(input) };
-  }
+const ENCODER = new TextEncoder();
 
-  const bytes = new Uint8Array(input.length);
+/**
+ * Inputs up to this length are written by the character loop; longer inputs
+ * by the native encoder.
+ *
+ * The loop has no fixed call cost, which makes it the faster path for short
+ * inputs. The bound also matches the size up to which V8 keeps a typed array's
+ * storage inside the JS heap: the native encoder requires an external backing
+ * store and would force one to be created for such a target. A target holding
+ * more than 64 octets already has an external store.
+ */
+const NATIVE_THRESHOLD = 64;
 
-  for (let i = 0; i < input.length; i += 1) {
-    const code = input.charCodeAt(i);
-    if (code > 0x7f) {
-      return { ok: false, failure: 'non_ascii' };
+/**
+ * Writes the ASCII octets of `input` into `target` at `offset`, which must
+ * already have room for `input.length` octets.
+ *
+ * Returns false when any character is outside ASCII. The target may then hold
+ * a partial write, so a caller must discard it on failure.
+ *
+ * The native encoder writes UTF-8, which coincides with ASCII exactly when
+ * every character is a single octet. Equal `read` and `written` counts that
+ * both match the input length establish that, since any character above
+ * 0x7F encodes to at least two octets and cannot make the counts agree.
+ */
+export function writeAscii(input: string, target: Uint8Array, offset: number): boolean {
+  const length = input.length;
+
+  if (length <= NATIVE_THRESHOLD) {
+    for (let i = 0; i < length; i += 1) {
+      const code = input.charCodeAt(i);
+      if (code > 0x7f) {
+        return false;
+      }
+      target[offset + i] = code;
     }
-    bytes[i] = code;
+    return true;
   }
 
-  return { ok: true, bytes };
+  const result = ENCODER.encodeInto(input, target.subarray(offset, offset + length));
+  return result.read === length && result.written === length;
+}
+
+export function encodeAscii(input: string): AsciiResult {
+  const bytes = new Uint8Array(input.length);
+  return writeAscii(input, bytes, 0) ? { ok: true, bytes } : { ok: false, failure: 'non_ascii' };
 }
 
 export function isAscii(input: string): boolean {

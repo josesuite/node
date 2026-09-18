@@ -6,23 +6,32 @@
  * must be at least the hash output size, though that is a necessary bound and
  * never evidence of entropy: a long but guessable secret passes it, so where
  * the key came from is what actually matters.
+ *
+ * The MAC is computed synchronously through `node:crypto`. HMAC over a
+ * signing input completes in a few microseconds, well below the fixed cost of
+ * an asynchronous provider dispatch, so keeping it on the calling thread is
+ * the faster choice on every supported runtime and does not measurably block
+ * the event loop.
  */
 
-import { toBufferSource } from '../../internal/bytes.ts';
+import { createHmac } from 'node:crypto';
+
+import { ownedBytes } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
 import { constantTime } from '../../internal/crypto/constant-time.ts';
-import { attempt, importCached, importRaw } from '../../internal/crypto/webcrypto.ts';
+import { secretKeyCached } from '../../internal/crypto/node.ts';
 
 interface HmacParameters {
+  /** Native digest name. */
   readonly hash: string;
   /** Full output size, which is also the minimum key size. */
   readonly outputBytes: number;
 }
 
 const HMAC_ALGORITHMS: Readonly<Record<string, HmacParameters>> = Object.freeze({
-  HS256: { hash: 'SHA-256', outputBytes: 32 },
-  HS384: { hash: 'SHA-384', outputBytes: 48 },
-  HS512: { hash: 'SHA-512', outputBytes: 64 },
+  HS256: { hash: 'sha256', outputBytes: 32 },
+  HS384: { hash: 'sha384', outputBytes: 48 },
+  HS512: { hash: 'sha512', outputBytes: 64 },
 });
 
 export function hmacOutputBytes(algorithm: string): number | undefined {
@@ -47,16 +56,15 @@ export async function computeHmac(
     return backendError('operation_failed');
   }
 
-  const result = await attempt(async () => {
-    // Verification computes the expected MAC through this same path, so a
-    // signing usage is the only one a cached handle is ever asked for.
-    const handle = await importCached(handleToken, () =>
-      importRaw(key, { name: 'HMAC', hash: parameters.hash }, ['sign']),
-    );
-    return crypto.subtle.sign('HMAC', handle, toBufferSource(signingInput));
-  });
-
-  return result.ok ? backendOk(new Uint8Array(result.value)) : result;
+  try {
+    const handle = secretKeyCached(handleToken, key);
+    // Exposed as a plain array over the digest's own backing store. The MAC is
+    // consumed by native comparison and encoding routines, which read an
+    // external backing store directly.
+    return backendOk(ownedBytes(createHmac(parameters.hash, handle).update(signingInput).digest()));
+  } catch {
+    return backendError('operation_failed');
+  }
 }
 
 /**

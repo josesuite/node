@@ -1,10 +1,27 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { constants, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
+import {
+  constants,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
+  generateKeyPairSync,
+  getCiphers,
+  randomBytes,
+  sign,
+  verify,
+} from 'node:crypto';
+
+import { openCbcHmac, sealCbcHmac } from '../../../src/algorithms/content-encryption/aes-cbc-hmac.ts';
+import { openGcm, sealGcm } from '../../../src/algorithms/content-encryption/aes-gcm.ts';
+import { signWithKey } from '../../../src/algorithms/index.ts';
+import { unwrapAesKw, wrapAesKw } from '../../../src/algorithms/jwe/aes-kw.ts';
 
 import { constantTime } from '../../../src/internal/crypto/constant-time.ts';
 import { deriveEcPublicPoint, deriveOkpPublicKey, validateEcPointOnCurve } from '../../../src/internal/crypto/node.ts';
 import { systemRandom } from '../../../src/internal/crypto/random.ts';
+import { importKeyBytes } from '../../../src/key/import.ts';
 import { availableCurves } from '../../helpers/runtime.ts';
 
 const EC_CURVES = availableCurves(['P-256', 'P-384', 'P-521', 'secp256k1']);
@@ -244,13 +261,18 @@ describe('WebCrypto backend selection', () => {
   });
 
   test('accepts an undersized HMAC key, so the length bound is enforced here', async () => {
-    // The provider imposes no minimum, which is why `computeHmac` checks the
+    // Neither provider imposes a minimum, which is why `computeHmac` checks the
     // key against the hash output size before signing.
     const key = await crypto.subtle.importKey('raw', new Uint8Array(8), { name: 'HMAC', hash: 'SHA-256' }, false, [
       'sign',
     ]);
 
     assert.notStrictEqual(key, undefined);
+    assert.doesNotThrow(() =>
+      createHmac('sha256', createSecretKey(new Uint8Array(8)))
+        .update('x')
+        .digest(),
+    );
   });
 
   test('rejects a private key handed to a public-only operation', async () => {
@@ -263,5 +285,139 @@ describe('WebCrypto backend selection', () => {
     await assert.rejects(
       crypto.subtle.importKey('jwk', jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']),
     );
+  });
+});
+
+describe('native backend selection', () => {
+  test('exposes the RFC 3394 wrap cipher for every AES-KW size', () => {
+    // AES key wrapping runs on the provider's own wrap cipher; the runtime's
+    // WebCrypto is a wrapper over the same cipher and offers no fallback.
+    const ciphers = getCiphers();
+    for (const name of ['id-aes128-wrap', 'id-aes192-wrap', 'id-aes256-wrap']) {
+      assert.ok(ciphers.includes(name), name);
+    }
+  });
+
+  test('AES-GCM through the native module matches WebCrypto octet for octet', async () => {
+    const plaintext = new Uint8Array(randomBytes(77));
+    const aad = new TextEncoder().encode('eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0');
+    for (const [algorithm, keyBytes] of [
+      ['A128GCM', 16],
+      ['A192GCM', 24],
+      ['A256GCM', 32],
+    ] as const) {
+      const key = new Uint8Array(randomBytes(keyBytes));
+      const iv = new Uint8Array(randomBytes(12));
+
+      const handle = await crypto.subtle.importKey('raw', key, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+      const combined = new Uint8Array(
+        await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad, tagLength: 128 }, handle, plaintext),
+      );
+
+      const sealed = await sealGcm(algorithm, key, iv, plaintext, aad);
+      assert.ok(sealed.ok, algorithm);
+      assert.deepStrictEqual(sealed.value.ciphertext, combined.subarray(0, plaintext.length), algorithm);
+      assert.deepStrictEqual(sealed.value.tag, combined.subarray(plaintext.length), algorithm);
+
+      const opened = await openGcm(algorithm, key, iv, sealed.value.ciphertext, sealed.value.tag, aad);
+      assert.ok(opened.ok);
+      assert.deepStrictEqual(opened.value, plaintext, algorithm);
+    }
+  });
+
+  test('AES-CBC-HMAC through the native module matches WebCrypto octet for octet', async () => {
+    const plaintext = new Uint8Array(randomBytes(77));
+    const aad = new TextEncoder().encode('eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0');
+    for (const [algorithm, hash, keyBytes, tagBytes] of [
+      ['A128CBC-HS256', 'SHA-256', 32, 16],
+      ['A192CBC-HS384', 'SHA-384', 48, 24],
+      ['A256CBC-HS512', 'SHA-512', 64, 32],
+    ] as const) {
+      const key = new Uint8Array(randomBytes(keyBytes));
+      const iv = new Uint8Array(randomBytes(16));
+      const macKey = key.slice(0, keyBytes / 2);
+      const encryptionKey = key.slice(keyBytes / 2);
+
+      const cbc = await crypto.subtle.importKey('raw', encryptionKey, { name: 'AES-CBC' }, false, ['encrypt']);
+      const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, cbc, plaintext));
+      const length = new Uint8Array(8);
+      new DataView(length.buffer).setBigUint64(0, BigInt(aad.length) * 8n);
+      const message = new Uint8Array([...aad, ...iv, ...ciphertext, ...length]);
+      const mac = await crypto.subtle.importKey('raw', macKey, { name: 'HMAC', hash }, false, ['sign']);
+      const tag = new Uint8Array(await crypto.subtle.sign('HMAC', mac, message)).subarray(0, tagBytes);
+
+      const sealed = await sealCbcHmac(algorithm, key, iv, plaintext, aad);
+      assert.ok(sealed.ok, algorithm);
+      assert.deepStrictEqual(sealed.value.ciphertext, ciphertext, algorithm);
+      assert.deepStrictEqual(sealed.value.tag, tag, algorithm);
+
+      const opened = await openCbcHmac(algorithm, key, iv, ciphertext, tag, aad);
+      assert.ok(opened.ok);
+      assert.deepStrictEqual(opened.value, plaintext, algorithm);
+    }
+  });
+
+  test('AES-KW through the native module matches WebCrypto octet for octet', async () => {
+    const cek = new Uint8Array(randomBytes(32));
+    for (const [algorithm, keyBytes] of [
+      ['A128KW', 16],
+      ['A192KW', 24],
+      ['A256KW', 32],
+    ] as const) {
+      const kek = new Uint8Array(randomBytes(keyBytes));
+      const wrapping = await crypto.subtle.importKey('raw', kek, 'AES-KW', false, ['wrapKey', 'unwrapKey']);
+      const target = await crypto.subtle.importKey('raw', cek, { name: 'HMAC', hash: 'SHA-256' }, true, ['sign']);
+      const expected = new Uint8Array(await crypto.subtle.wrapKey('raw', target, wrapping, 'AES-KW'));
+
+      const wrapped = await wrapAesKw(algorithm, kek, cek);
+      assert.ok(wrapped.ok, algorithm);
+      assert.deepStrictEqual(wrapped.value, expected, algorithm);
+
+      const unwrapped = await unwrapAesKw(algorithm, kek, expected);
+      assert.ok(unwrapped.ok);
+      assert.deepStrictEqual(unwrapped.value, cek, algorithm);
+    }
+  });
+
+  test('native outputs are plain arrays owning their whole backing store', async () => {
+    // A view into a shared provider pool would let a caller reach neighbouring
+    // allocations through `.buffer`; every released value must own its store.
+    const key = new Uint8Array(randomBytes(32));
+    const sealed = await sealGcm('A256GCM', key, new Uint8Array(12), new Uint8Array(randomBytes(40)), new Uint8Array());
+    assert.ok(sealed.ok);
+    for (const bytes of [sealed.value.ciphertext, sealed.value.tag]) {
+      assert.strictEqual(Object.getPrototypeOf(bytes), Uint8Array.prototype);
+      assert.strictEqual(bytes.byteOffset, 0);
+      assert.strictEqual(bytes.buffer.byteLength, bytes.byteLength);
+    }
+  });
+
+  test('HMAC through the native module matches WebCrypto octet for octet', async () => {
+    // HMAC is computed natively for performance. Both providers wrap the same
+    // primitive, and this pins that the swap is not observable on the wire.
+    const input = new TextEncoder().encode('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSJ9');
+    for (const [algorithm, hash, keyBytes] of [
+      ['HS256', 'sha256', 32],
+      ['HS384', 'sha384', 48],
+      ['HS512', 'sha512', 64],
+    ] as const) {
+      const key = new Uint8Array(randomBytes(keyBytes));
+
+      const handle = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: `SHA-${hash.slice(3)}` }, false, [
+        'sign',
+      ]);
+      const expected = new Uint8Array(await crypto.subtle.sign('HMAC', handle, input));
+
+      const secret = importKeyBytes(new TextEncoder().encode(JSON.stringify({ kty: 'oct', k: b64u(key) })), {
+        algorithm,
+        operation: 'sign',
+      });
+      assert.ok(secret.ok);
+      const computed = await signWithKey(secret.key, input);
+      assert.ok(computed.ok);
+
+      assert.deepStrictEqual(computed.value, expected, algorithm);
+      assert.strictEqual(Object.getPrototypeOf(computed.value), Uint8Array.prototype);
+    }
   });
 });

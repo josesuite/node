@@ -15,7 +15,7 @@ import { aesKwKeySize, wrapAesKw } from '../algorithms/jwe/aes-kw.ts';
 import { GCMKW_IV_BYTES, gcmKwKeySize, wrapGcmKw } from '../algorithms/jwe/aes-gcm-kw.ts';
 import { concatKdf, partyInfo } from '../algorithms/jwe/concat-kdf.ts';
 import { directCek } from '../algorithms/jwe/direct.ts';
-import { agree, generateEphemeralEc, generateEphemeralOkp, isAgreementCurve } from '../algorithms/jwe/ecdh-es.ts';
+import { agreeEphemeral, isAgreementCurve } from '../algorithms/jwe/ecdh-es.ts';
 import { agreementWrappingAlgorithm, keyManagementShape } from '../algorithms/jwe/index.ts';
 import { encryptRsaOaep } from '../algorithms/jwe/rsaes-oaep.ts';
 import type { ErrorCategory } from '../errors/codes.ts';
@@ -203,7 +203,8 @@ async function protectFor(
       if (key.keyType !== 'RSA') {
         return { ok: false, failure: fail('incompatible_key', 'transport_requires_rsa_key') };
       }
-      const encrypted = await encryptRsaOaep(key.algorithm, key.material as RsaPublicMaterial, cek);
+      // The key record memoizes its provider handle across objects.
+      const encrypted = await encryptRsaOaep(key.algorithm, key.material as RsaPublicMaterial, cek, key);
       return encrypted.ok
         ? { ok: true, value: { encryptedKey: encrypted.value, ephemeralPublicKey: undefined, gcmKw: undefined } }
         : { ok: false, failure: fail('backend_failure', 'key_transport_failed') };
@@ -307,59 +308,39 @@ async function deriveAgreedKey(
   }
 
   // The key type decides which family generates the ephemeral half and whether
-  // the published point carries a Y coordinate.
-  let ownPrivate: EcMaterial | OkpMaterial;
-  let ephemeralPublicKey: EphemeralPublicKey;
-  let peer: { curve: string; x: Uint8Array; y?: Uint8Array | undefined };
+  // the published point carries a Y coordinate. The ephemeral private half
+  // stays inside the provider for the duration of the agreement.
+  const peer =
+    recipientKey.keyType === 'EC'
+      ? { curve: material.curve, x: material.x, y: (material as EcMaterial).y }
+      : { curve: material.curve, x: material.x };
 
-  if (recipientKey.keyType === 'EC') {
-    const ephemeral = await generateEphemeralEc(material.curve);
-    if (!ephemeral.ok) {
-      return { ok: false, failure: fail('backend_failure', 'ephemeral_generation_failed') };
-    }
-    ownPrivate = {
-      curve: material.curve as EcMaterial['curve'],
-      x: ephemeral.value.x,
-      y: ephemeral.value.y,
-      d: ephemeral.value.d,
-    };
-    ephemeralPublicKey = { kty: 'EC', crv: material.curve, x: ephemeral.value.x, y: ephemeral.value.y };
-    peer = { curve: material.curve, x: material.x, y: (material as EcMaterial).y };
-  } else {
-    const ephemeral = await generateEphemeralOkp(material.curve);
-    if (!ephemeral.ok) {
-      return { ok: false, failure: fail('backend_failure', 'ephemeral_generation_failed') };
-    }
-    ownPrivate = {
-      curve: material.curve as OkpMaterial['curve'],
-      x: ephemeral.value.x,
-      d: ephemeral.value.d,
-    };
-    ephemeralPublicKey = { kty: 'OKP', crv: material.curve, x: ephemeral.value.x, y: undefined };
-    peer = { curve: material.curve, x: material.x };
-  }
-
-  const secret = await agree(ownPrivate, peer);
-  if (!secret.ok) {
-    ownPrivate.d?.fill(0);
+  // The recipient record memoizes the import of its static public key.
+  const agreed = await agreeEphemeral(peer, recipientKey);
+  if (!agreed.ok) {
     return { ok: false, failure: fail('backend_failure', 'key_agreement_failed') };
   }
+  const secret = agreed.value.secret;
+  const ephemeralPublicKey: EphemeralPublicKey = {
+    kty: recipientKey.keyType,
+    crv: material.curve,
+    x: agreed.value.ephemeralPublicKey.x,
+    y: agreed.value.ephemeralPublicKey.y,
+  };
 
   const encoded = encodeAscii(algorithmId);
   if (!encoded.ok) {
-    secret.value.fill(0);
-    ownPrivate.d?.fill(0);
+    secret.fill(0);
     return { ok: false, failure: fail('invalid_header', 'algorithm_name_not_ascii') };
   }
 
-  const derived = concatKdf(secret.value, {
+  const derived = concatKdf(secret, {
     algorithmId: encoded.bytes,
     partyUInfo: partyInfo(party.partyU),
     partyVInfo: partyInfo(party.partyV),
     keyBytes,
   });
-  secret.value.fill(0);
-  ownPrivate.d?.fill(0);
+  secret.fill(0);
 
   return {
     ok: true,

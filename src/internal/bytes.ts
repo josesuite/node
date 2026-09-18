@@ -36,3 +36,18 @@ export function concatBytes(...parts: readonly Uint8Array[]): Uint8Array {
   }
   return result;
 }
+
+/**
+ * Exposes a provider `Buffer` as a plain `Uint8Array`, sharing the backing
+ * store when the buffer owns all of it and copying otherwise.
+ *
+ * Cipher and digest output is allocated standalone, so the shared path is the
+ * common one. The copy covers a buffer carved from a shared pool: a view of
+ * such a buffer would expose neighbouring allocations through `.buffer`.
+ */
+export function ownedBytes(buffer: Buffer): Uint8Array {
+  if (buffer.byteOffset === 0 && buffer.byteLength === buffer.buffer.byteLength) {
+    return new Uint8Array(buffer.buffer);
+  }
+  return new Uint8Array(buffer);
+}

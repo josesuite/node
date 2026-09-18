@@ -14,7 +14,7 @@
 
 import { toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { attempt, importJwk } from '../../internal/crypto/webcrypto.ts';
+import { attempt, importCached, importJwk } from '../../internal/crypto/webcrypto.ts';
 import type { RsaPrivateMaterial, RsaPublicMaterial } from '../../key/validation.ts';
 import { rsaJwk, rsaPublicJwk } from '../jws/rsa-common.ts';
 
@@ -31,6 +31,7 @@ export async function encryptRsaOaep(
   algorithm: string,
   key: RsaPublicMaterial,
   cek: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<Uint8Array>> {
   const hash = oaepHash(algorithm);
   if (hash === undefined) {
@@ -38,7 +39,9 @@ export async function encryptRsaOaep(
   }
 
   const result = await attempt(async () => {
-    const handle = await importJwk(rsaPublicJwk(key), { name: 'RSA-OAEP', hash }, ['encrypt']);
+    const handle = await importCached(handleToken, () =>
+      importJwk(rsaPublicJwk(key), { name: 'RSA-OAEP', hash }, ['encrypt']),
+    );
     // No label is supplied, which is what the JOSE construction requires, and
     // MGF1 follows the same hash.
     return crypto.subtle.encrypt({ name: 'RSA-OAEP' }, handle, toBufferSource(cek));
@@ -60,6 +63,7 @@ export async function decryptRsaOaep(
   algorithm: string,
   key: RsaPrivateMaterial,
   encryptedKey: Uint8Array,
+  handleToken?: object,
 ): Promise<BackendResult<Uint8Array | undefined>> {
   const hash = oaepHash(algorithm);
   if (hash === undefined) {
@@ -71,7 +75,9 @@ export async function decryptRsaOaep(
     return backendOk(undefined);
   }
 
-  const imported = await attempt(() => importJwk(rsaJwk(key), { name: 'RSA-OAEP', hash }, ['decrypt']));
+  const imported = await attempt(() =>
+    importCached(handleToken, () => importJwk(rsaJwk(key), { name: 'RSA-OAEP', hash }, ['decrypt'])),
+  );
   if (!imported.ok) {
     return imported;
   }

@@ -1,0 +1,70 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 0 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test on Node.js ${{ matrix.node-version }}
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version:
+          # Absolute package minimum
+          - 20.10.0
+          # Major-version boundaries
+          - 21.0.0
+          - 22.0.0
+          - 23.0.0
+          - 24.0.0
+          - 25.0.0
+          - 26.0.0
+          # Important maintained/latest lines
+          - 20
+          - 22
+          - 24
+          - 26
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Set up Bun runtime
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      # Node's test runner only discovers TypeScript test files once unflagged
+      # type stripping lands in 22.18.0. On older runtimes `node --test` matches
+      # nothing and exits 0, so those versions must go through the tsx runner.
+      - name: Run tests
+        run: |
+          if node -e 'const [j,n] = process.versions.node.split(".").map(Number); process.exit(j > 22 || (j === 22 && n >= 18) ? 0 : 1)'; then
+            bun run test
+          else
+            bun run test_legacy
+          fi

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { decodeUtf8, encodeUtf8, utf8Length } from '../../../src/internal/encoding/utf8.ts';
-import { encodeAscii, isAscii } from '../../../src/internal/encoding/ascii.ts';
+import { encodeAscii, isAscii, writeAscii } from '../../../src/internal/encoding/ascii.ts';
 
 function failure(bytes: number[]): string {
   const result = decodeUtf8(new Uint8Array(bytes));
@@ -90,7 +90,7 @@ describe('utf8Length', () => {
 
 describe('encodeAscii', () => {
   test('preserves exact bytes and rejects non-ASCII around the native-path boundary', () => {
-    for (const length of [255, 256, 257, 8192]) {
+    for (const length of [1, 32, 63, 64, 65, 255, 256, 257, 8192]) {
       const input = 'a'.repeat(length);
       const result = encodeAscii(input);
       assert.deepStrictEqual(result, { ok: true, bytes: encodeUtf8(input) });
@@ -130,5 +130,34 @@ describe('encodeAscii', () => {
       assert.strictEqual(encodeAscii(String.fromCharCode(code)).ok, true);
     }
     assert.strictEqual(encodeAscii(String.fromCharCode(128)).ok, false);
+  });
+});
+
+describe('writeAscii', () => {
+  test('writes at an offset on both the loop and native paths', () => {
+    for (const length of [0, 1, 63, 64, 65, 300]) {
+      const input = 'x'.repeat(length);
+      const target = new Uint8Array(length + 4).fill(0xff);
+      assert.strictEqual(writeAscii(input, target, 3), true);
+      assert.deepStrictEqual([...target.subarray(0, 3)], [0xff, 0xff, 0xff]);
+      assert.deepStrictEqual(target.subarray(3, 3 + length), encodeUtf8(input));
+      assert.strictEqual(target[length + 3], 0xff);
+    }
+  });
+
+  test('reports non-ASCII wherever it appears, including where a multi-octet sequence would still fit', () => {
+    // The native encoder emits UTF-8 into whatever room remains. A two-octet
+    // character in the middle of a long input fits, so the check has to rest on
+    // the read and written counts rather than on the encoder stopping early.
+    for (const length of [4, 63, 64, 65, 300]) {
+      for (const position of [0, Math.floor(length / 2), length - 1]) {
+        for (const character of ['\u0080', 'é', '\ud800', '😀']) {
+          const input =
+            'a'.repeat(position) + character + 'a'.repeat(Math.max(0, length - position - character.length));
+          const target = new Uint8Array(input.length + 8);
+          assert.strictEqual(writeAscii(input, target, 0), false, JSON.stringify(input));
+        }
+      }
+    }
   });
 });
