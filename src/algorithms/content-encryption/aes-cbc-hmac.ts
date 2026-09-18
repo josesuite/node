@@ -12,9 +12,9 @@
  * from one key so the two operations cannot be given independently chosen keys.
  */
 
-import { createHmac, createSecretKey } from 'node:crypto';
+import { createCipheriv, createHmac, createSecretKey } from 'node:crypto';
 
-import { toBufferSource } from '../../internal/bytes.ts';
+import { ownedBytes, toBufferSource } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
 import { constantTime } from '../../internal/crypto/constant-time.ts';
 import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
@@ -22,6 +22,8 @@ import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
 export interface CbcHmacParameters {
   /** Native digest name. */
   readonly hash: string;
+  /** Native cipher name. */
+  readonly cipher: string;
   readonly keyBytes: number;
   readonly tagBytes: number;
 }
@@ -29,9 +31,9 @@ export interface CbcHmacParameters {
 export const CBC_IV_BYTES = 16;
 
 const CBC_HMAC_ALGORITHMS: Readonly<Record<string, CbcHmacParameters>> = Object.freeze({
-  'A128CBC-HS256': { hash: 'sha256', keyBytes: 32, tagBytes: 16 },
-  'A192CBC-HS384': { hash: 'sha384', keyBytes: 48, tagBytes: 24 },
-  'A256CBC-HS512': { hash: 'sha512', keyBytes: 64, tagBytes: 32 },
+  'A128CBC-HS256': { hash: 'sha256', cipher: 'aes-128-cbc', keyBytes: 32, tagBytes: 16 },
+  'A192CBC-HS384': { hash: 'sha384', cipher: 'aes-192-cbc', keyBytes: 48, tagBytes: 24 },
+  'A256CBC-HS512': { hash: 'sha512', cipher: 'aes-256-cbc', keyBytes: 64, tagBytes: 32 },
 });
 
 export function cbcHmacParameters(algorithm: string): CbcHmacParameters | undefined {
@@ -104,16 +106,14 @@ export async function sealCbcHmac(
 
   // PKCS #7 padding is applied by the provider, including a full block when the
   // plaintext is empty or block-aligned, which the construction requires.
-  const encrypted = await attempt(async () => {
-    const handle = await importRaw(encryptionKey, { name: 'AES-CBC', length: half * 8 }, ['encrypt']);
-    return crypto.subtle.encrypt({ name: 'AES-CBC', iv: toBufferSource(iv) }, handle, toBufferSource(plaintext));
-  });
-
-  if (!encrypted.ok) {
-    return encrypted;
+  let ciphertext: Uint8Array;
+  try {
+    const cipher = createCipheriv(parameters.cipher, createSecretKey(encryptionKey), iv);
+    ciphertext = ownedBytes(Buffer.concat([cipher.update(plaintext), cipher.final()]));
+  } catch {
+    return backendError('operation_failed');
   }
 
-  const ciphertext = new Uint8Array(encrypted.value);
   const tag = computeTag(parameters, macKey, iv, ciphertext, additionalData);
   if (!tag.ok) {
     return tag;
