@@ -18,9 +18,37 @@
  * one fails closed instead of silently altering which keys this library accepts.
  */
 
-import { createECDH, createPrivateKey, createPublicKey } from 'node:crypto';
+import { createECDH, createPrivateKey, createPublicKey, createSecretKey, type KeyObject } from 'node:crypto';
 
 import { backendError, backendOk, type BackendResult } from './backend.ts';
+
+const SECRET_KEY_CACHE = new WeakMap<object, KeyObject>();
+
+/**
+ * Memoizes the `KeyObject` for a long-lived key record.
+ *
+ * The cache follows the same rules as the provider handle cache: it is keyed
+ * on the identity of the record, never on key material; entries are weak; and
+ * the record must be bound to one algorithm and one operation for its whole
+ * lifetime.
+ *
+ * A `KeyObject` carries the provider's prepared key state, so each operation
+ * under the record skips the per-call key preparation that raw octets incur.
+ */
+export function secretKeyCached(token: object | undefined, material: Uint8Array): KeyObject {
+  if (token === undefined) {
+    return createSecretKey(material);
+  }
+
+  const cached = SECRET_KEY_CACHE.get(token);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const created = createSecretKey(material);
+  SECRET_KEY_CACHE.set(token, created);
+  return created;
+}
 
 /** JOSE curve names mapped to the provider's own curve identifiers. */
 const EC_CURVE_NAMES: Readonly<Record<string, string>> = Object.freeze({
