@@ -436,6 +436,12 @@ describe('ECDH-ES agreement', () => {
       }
     });
 
+    test(`${curve} sender rejects an off-curve recipient point`, async () => {
+      const recipient = ecMaterial(curve);
+      const result = await agreeEphemeral({ curve, x: flipBit(recipient.x, 0, 0xff), y: recipient.y });
+      assert.strictEqual(result.ok, false);
+    });
+
     test(`${curve} rejects an off-curve peer point`, async () => {
       const recipient = ecMaterial(curve);
       const offCurve = flipBit(recipient.x, 0, 0xff);
