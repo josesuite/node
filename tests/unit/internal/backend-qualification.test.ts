@@ -8,9 +8,12 @@ import {
   createSecretKey,
   generateKeyPairSync,
   getCiphers,
+  randomBytes,
   sign,
   verify,
 } from 'node:crypto';
+
+import { openGcm, sealGcm } from '../../../src/algorithms/content-encryption/aes-gcm.ts';
 
 import { constantTime } from '../../../src/internal/crypto/constant-time.ts';
 import { deriveEcPublicPoint, deriveOkpPublicKey, validateEcPointOnCurve } from '../../../src/internal/crypto/node.ts';
@@ -288,6 +291,33 @@ describe('native backend selection', () => {
     const ciphers = getCiphers();
     for (const name of ['id-aes128-wrap', 'id-aes192-wrap', 'id-aes256-wrap']) {
       assert.ok(ciphers.includes(name), name);
+    }
+  });
+
+  test('AES-GCM through the native module matches WebCrypto octet for octet', async () => {
+    const plaintext = new Uint8Array(randomBytes(77));
+    const aad = new TextEncoder().encode('eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0');
+    for (const [algorithm, keyBytes] of [
+      ['A128GCM', 16],
+      ['A192GCM', 24],
+      ['A256GCM', 32],
+    ] as const) {
+      const key = new Uint8Array(randomBytes(keyBytes));
+      const iv = new Uint8Array(randomBytes(12));
+
+      const handle = await crypto.subtle.importKey('raw', key, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+      const combined = new Uint8Array(
+        await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad, tagLength: 128 }, handle, plaintext),
+      );
+
+      const sealed = await sealGcm(algorithm, key, iv, plaintext, aad);
+      assert.ok(sealed.ok, algorithm);
+      assert.deepStrictEqual(sealed.value.ciphertext, combined.subarray(0, plaintext.length), algorithm);
+      assert.deepStrictEqual(sealed.value.tag, combined.subarray(plaintext.length), algorithm);
+
+      const opened = await openGcm(algorithm, key, iv, sealed.value.ciphertext, sealed.value.tag, aad);
+      assert.ok(opened.ok);
+      assert.deepStrictEqual(opened.value, plaintext, algorithm);
     }
   });
 });
