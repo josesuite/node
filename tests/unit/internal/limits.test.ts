@@ -106,6 +106,16 @@ describe('limits reaching an operation are validated', () => {
     const frozenCopy = Object.freeze({ ...LIMITS_V1, payload: LIMITS_V1.payload + 1 }) as Limits;
     assert.strictEqual(checkLimits(frozenCopy), 'limit_payload_exceeds_baseline');
   });
+
+  test('lowered values are frozen, so the fast path cannot see an edit', () => {
+    const lowered = lowerLimits({ payload: 1 });
+    assert.ok(Object.isFrozen(lowered));
+    assert.throws(() => {
+      (lowered as unknown as Record<string, number>)['payload'] = LIMITS_V1.payload + 1;
+    }, TypeError);
+    assert.strictEqual(checkLimits(lowered), undefined);
+    assert.strictEqual(lowered.payload, 1);
+  });
 });
 
 describe('public operations refuse unvalidated limits', () => {
