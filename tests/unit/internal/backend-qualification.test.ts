@@ -15,11 +15,13 @@ import {
 
 import { openCbcHmac, sealCbcHmac } from '../../../src/algorithms/content-encryption/aes-cbc-hmac.ts';
 import { openGcm, sealGcm } from '../../../src/algorithms/content-encryption/aes-gcm.ts';
+import { signWithKey } from '../../../src/algorithms/index.ts';
 import { unwrapAesKw, wrapAesKw } from '../../../src/algorithms/jwe/aes-kw.ts';
 
 import { constantTime } from '../../../src/internal/crypto/constant-time.ts';
 import { deriveEcPublicPoint, deriveOkpPublicKey, validateEcPointOnCurve } from '../../../src/internal/crypto/node.ts';
 import { systemRandom } from '../../../src/internal/crypto/random.ts';
+import { importKeyBytes } from '../../../src/key/import.ts';
 import { availableCurves } from '../../helpers/runtime.ts';
 
 const EC_CURVES = availableCurves(['P-256', 'P-384', 'P-521', 'secp256k1']);
@@ -387,6 +389,35 @@ describe('native backend selection', () => {
       assert.strictEqual(Object.getPrototypeOf(bytes), Uint8Array.prototype);
       assert.strictEqual(bytes.byteOffset, 0);
       assert.strictEqual(bytes.buffer.byteLength, bytes.byteLength);
+    }
+  });
+
+  test('HMAC through the native module matches WebCrypto octet for octet', async () => {
+    // HMAC is computed natively for performance. Both providers wrap the same
+    // primitive, and this pins that the swap is not observable on the wire.
+    const input = new TextEncoder().encode('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSJ9');
+    for (const [algorithm, hash, keyBytes] of [
+      ['HS256', 'sha256', 32],
+      ['HS384', 'sha384', 48],
+      ['HS512', 'sha512', 64],
+    ] as const) {
+      const key = new Uint8Array(randomBytes(keyBytes));
+
+      const handle = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: `SHA-${hash.slice(3)}` }, false, [
+        'sign',
+      ]);
+      const expected = new Uint8Array(await crypto.subtle.sign('HMAC', handle, input));
+
+      const secret = importKeyBytes(new TextEncoder().encode(JSON.stringify({ kty: 'oct', k: b64u(key) })), {
+        algorithm,
+        operation: 'sign',
+      });
+      assert.ok(secret.ok);
+      const computed = await signWithKey(secret.key, input);
+      assert.ok(computed.ok);
+
+      assert.deepStrictEqual(computed.value, expected, algorithm);
+      assert.strictEqual(Object.getPrototypeOf(computed.value), Uint8Array.prototype);
     }
   });
 });
