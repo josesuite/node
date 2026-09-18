@@ -22,11 +22,10 @@
  * of an asynchronous provider dispatch.
  */
 
-import { type CipherGCMTypes, createCipheriv, createSecretKey } from 'node:crypto';
+import { type CipherGCMTypes, createCipheriv, createDecipheriv, createSecretKey } from 'node:crypto';
 
-import { ownedBytes, toBufferSource } from '../../internal/bytes.ts';
+import { ownedBytes } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
-import { importRaw } from '../../internal/crypto/webcrypto.ts';
 
 export const GCMKW_IV_BYTES = 12;
 export const GCMKW_TAG_BYTES = 16;
@@ -107,11 +106,11 @@ export async function unwrapGcmKw(
   encryptedKey: Uint8Array,
   tag: Uint8Array,
 ): Promise<BackendResult<Uint8Array | undefined>> {
-  const kekBytes = gcmKwKeySize(algorithm);
-  if (kekBytes === undefined) {
+  const parameters = GCMKW_ALGORITHMS[algorithm];
+  if (parameters === undefined) {
     return backendError('unsupported');
   }
-  if (kek.length !== kekBytes) {
+  if (kek.length !== parameters.kekBytes) {
     return backendError('operation_failed');
   }
   // Both widths are public and fixed, so a wrong width is a malformed object
@@ -120,19 +119,24 @@ export async function unwrapGcmKw(
     return backendOk(undefined);
   }
 
-  const combined = new Uint8Array(encryptedKey.length + tag.length);
-  combined.set(encryptedKey);
-  combined.set(tag, encryptedKey.length);
-
+  let decipher;
   try {
-    const handle = await importRaw(kek, { name: 'AES-GCM', length: kekBytes * 8 }, ['decrypt']);
-    const cek = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: toBufferSource(iv), tagLength: GCMKW_TAG_BYTES * 8 },
-      handle,
-      toBufferSource(combined),
-    );
-    return backendOk(new Uint8Array(cek));
+    decipher = createDecipheriv(parameters.cipher, createSecretKey(kek), iv, { authTagLength: GCMKW_TAG_BYTES });
+    decipher.setAuthTag(tag);
   } catch {
     return backendOk(undefined);
   }
+
+  // The provider streams provisional output from `update` and checks the tag
+  // only in `final`. That output stays quarantined in this frame until the tag
+  // verifies, and is cleared on failure.
+  const provisional = decipher.update(encryptedKey);
+  try {
+    decipher.final();
+  } catch {
+    provisional.fill(0);
+    return backendOk(undefined);
+  }
+
+  return backendOk(ownedBytes(provisional));
 }
