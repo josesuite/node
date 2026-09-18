@@ -90,7 +90,7 @@ describe('utf8Length', () => {
 
 describe('encodeAscii', () => {
   test('preserves exact bytes and rejects non-ASCII around the native-path boundary', () => {
-    for (const length of [255, 256, 257, 8192]) {
+    for (const length of [1, 32, 63, 64, 65, 255, 256, 257, 8192]) {
       const input = 'a'.repeat(length);
       const result = encodeAscii(input);
       assert.deepStrictEqual(result, { ok: true, bytes: encodeUtf8(input) });
