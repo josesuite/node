@@ -376,4 +376,17 @@ describe('native backend selection', () => {
       assert.deepStrictEqual(unwrapped.value, cek, algorithm);
     }
   });
+
+  test('native outputs are plain arrays owning their whole backing store', async () => {
+    // A view into a shared provider pool would let a caller reach neighbouring
+    // allocations through `.buffer`; every released value must own its store.
+    const key = new Uint8Array(randomBytes(32));
+    const sealed = await sealGcm('A256GCM', key, new Uint8Array(12), new Uint8Array(randomBytes(40)), new Uint8Array());
+    assert.ok(sealed.ok);
+    for (const bytes of [sealed.value.ciphertext, sealed.value.tag]) {
+      assert.strictEqual(Object.getPrototypeOf(bytes), Uint8Array.prototype);
+      assert.strictEqual(bytes.byteOffset, 0);
+      assert.strictEqual(bytes.buffer.byteLength, bytes.byteLength);
+    }
+  });
 });
