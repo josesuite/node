@@ -8,10 +8,7 @@
  * valid.
  */
 
-import { concatBytes } from '../internal/bytes.ts';
-import { encodeAscii } from '../internal/encoding/ascii.ts';
-
-const PERIOD = new Uint8Array([0x2e]);
+import { encodeAscii, writeAscii } from '../internal/encoding/ascii.ts';
 
 export type AadFailure =
   /** A component held a byte outside the ASCII range it is defined over. */
@@ -45,10 +42,14 @@ export function buildAdditionalData(protectedComponent: string, aadComponent: st
     return { ok: true, bytes: header.bytes };
   }
 
-  const aad = encodeAscii(aadComponent);
-  if (!aad.ok) {
+  // Assembled directly into one allocation of its final size; allocation is
+  // the dominant cost at these sizes.
+  const bytes = new Uint8Array(protectedComponent.length + 1 + aadComponent.length);
+  bytes.set(header.bytes);
+  bytes[protectedComponent.length] = 0x2e;
+  if (!writeAscii(aadComponent, bytes, protectedComponent.length + 1)) {
     return { ok: false, failure: 'non_ascii_component' };
   }
 
-  return { ok: true, bytes: concatBytes(header.bytes, PERIOD, aad.bytes) };
+  return { ok: true, bytes };
 }
