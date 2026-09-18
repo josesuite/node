@@ -10,14 +10,18 @@
  *
  * The CEK is split in half, MAC key first and AES key second. Both halves come
  * from one key so the two operations cannot be given independently chosen keys.
+ *
+ * Both primitives run synchronously through `node:crypto`. For JWE-sized
+ * inputs the cipher and MAC work is a few microseconds, below the fixed cost
+ * of an asynchronous provider dispatch, and the incremental MAC interface
+ * covers the four authenticated parts without an intermediate concatenation.
  */
 
-import { createCipheriv, createHmac, createSecretKey } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, createSecretKey } from 'node:crypto';
 
-import { ownedBytes, toBufferSource } from '../../internal/bytes.ts';
+import { ownedBytes } from '../../internal/bytes.ts';
 import { backendError, backendOk, type BackendResult } from '../../internal/crypto/backend.ts';
 import { constantTime } from '../../internal/crypto/constant-time.ts';
-import { attempt, importRaw } from '../../internal/crypto/webcrypto.ts';
 
 export interface CbcHmacParameters {
   /** Native digest name. */
@@ -165,17 +169,14 @@ export async function openCbcHmac(
     return backendOk(undefined);
   }
 
-  const imported = await attempt(() => importRaw(encryptionKey, { name: 'AES-CBC', length: half * 8 }, ['decrypt']));
-  if (!imported.ok) {
-    return imported;
+  let decipher;
+  try {
+    decipher = createDecipheriv(parameters.cipher, createSecretKey(encryptionKey), iv);
+  } catch {
+    return backendError('operation_failed');
   }
   try {
-    const plaintext = await crypto.subtle.decrypt(
-      { name: 'AES-CBC', iv: toBufferSource(iv) },
-      imported.value,
-      toBufferSource(ciphertext),
-    );
-    return backendOk(new Uint8Array(plaintext));
+    return backendOk(ownedBytes(Buffer.concat([decipher.update(ciphertext), decipher.final()])));
   } catch {
     // The tag already verified, so malformed padding here means the ciphertext
     // was produced by something other than this construction. It stays an
