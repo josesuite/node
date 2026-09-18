@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { constants, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
+import {
+  constants,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  createSecretKey,
+  generateKeyPairSync,
+  sign,
+  verify,
+} from 'node:crypto';
 
 import { constantTime } from '../../../src/internal/crypto/constant-time.ts';
 import { deriveEcPublicPoint, deriveOkpPublicKey, validateEcPointOnCurve } from '../../../src/internal/crypto/node.ts';
@@ -244,13 +253,18 @@ describe('WebCrypto backend selection', () => {
   });
 
   test('accepts an undersized HMAC key, so the length bound is enforced here', async () => {
-    // The provider imposes no minimum, which is why `computeHmac` checks the
+    // Neither provider imposes a minimum, which is why `computeHmac` checks the
     // key against the hash output size before signing.
     const key = await crypto.subtle.importKey('raw', new Uint8Array(8), { name: 'HMAC', hash: 'SHA-256' }, false, [
       'sign',
     ]);
 
     assert.notStrictEqual(key, undefined);
+    assert.doesNotThrow(() =>
+      createHmac('sha256', createSecretKey(new Uint8Array(8)))
+        .update('x')
+        .digest(),
+    );
   });
 
   test('rejects a private key handed to a public-only operation', async () => {
