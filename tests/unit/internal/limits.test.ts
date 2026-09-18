@@ -93,6 +93,19 @@ describe('limits reaching an operation are validated', () => {
     assert.strictEqual(checkLimits(LIMITS_V1), undefined);
     assert.strictEqual(checkLimits(lowerLimits({ payload: 1 })), undefined);
   });
+
+  test('walks every entry of a value it did not build, even one equal to the baseline', () => {
+    // The fast path is keyed on the object this module froze, never on shape
+    // or contents: a structurally identical copy still gets the full check, so
+    // it cannot be used to smuggle an edit made after the copy was taken.
+    const copy = { ...LIMITS_V1 } as Limits;
+    assert.strictEqual(checkLimits(copy), undefined);
+    (copy as unknown as Record<string, number>)['payload'] = LIMITS_V1.payload + 1;
+    assert.strictEqual(checkLimits(copy), 'limit_payload_exceeds_baseline');
+
+    const frozenCopy = Object.freeze({ ...LIMITS_V1, payload: LIMITS_V1.payload + 1 }) as Limits;
+    assert.strictEqual(checkLimits(frozenCopy), 'limit_payload_exceeds_baseline');
+  });
 });
 
 describe('public operations refuse unvalidated limits', () => {
