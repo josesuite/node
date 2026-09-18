@@ -153,6 +153,15 @@ const BASELINE = Object.freeze({
 /** The baseline itself is a validated value: every entry equals its own bound. */
 export const LIMITS_V1 = BASELINE as unknown as Limits;
 
+/**
+ * Limits values this module built and froze.
+ *
+ * A frozen value produced by `lowerLimits` still holds exactly the entries
+ * that were validated when it was built, so `checkLimits` can accept it by
+ * identity. The set is weak and never keeps a value alive.
+ */
+const VALIDATED_VALUES = new WeakSet<object>([BASELINE]);
+
 type LimitName = keyof typeof BASELINE;
 
 const LIMIT_KEYS = Object.keys(BASELINE) as readonly LimitName[];
@@ -182,7 +191,9 @@ export function lowerLimits(overrides: Partial<Record<LimitName, number>>): Limi
     result[key] = override;
   }
 
-  return Object.freeze(result) as unknown as Limits;
+  const limits = Object.freeze(result);
+  VALIDATED_VALUES.add(limits);
+  return limits as unknown as Limits;
 }
 
 /**
@@ -194,6 +205,12 @@ export function lowerLimits(overrides: Partial<Record<LimitName, number>>): Limi
  * genuinely lowered or does not run at all.
  */
 export function checkLimits(limits: Limits): string | undefined {
+  // A frozen value this module built holds the entries validated at build
+  // time. Any other value, including a spread copy of one, is walked in full.
+  if (VALIDATED_VALUES.has(limits) && Object.isFrozen(limits)) {
+    return undefined;
+  }
+
   const values = limits as unknown as Partial<Record<LimitName, unknown>>;
 
   for (const key of LIMIT_KEYS) {
