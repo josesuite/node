@@ -5,17 +5,21 @@
  * Qualification of this provider established the behaviour these functions
  * compensate for:
  *
- * - Importing an EC private JWK and exporting it again echoes back the supplied
- *   `x` and `y` rather than the point derived from `d`, so a round trip cannot
- *   detect a mismatched public component. Public points are therefore computed
- *   from the private scalar by scalar multiplication instead.
+ * - Importing an EC private JWK and exporting it again never yields the point
+ *   derived from `d`: runtimes either refuse the key or echo the supplied `x`
+ *   and `y` back. Either way a round trip cannot detect a mismatched public
+ *   component, so public points are computed from the private scalar by scalar
+ *   multiplication instead.
  * - Ed25519 public-key import accepts low-order points, the identity, and
  *   non-canonical encodings, so those are checked before a key is admitted.
- * - X25519 accepts a non-canonical public alias and does not check that a
- *   supplied `x` matches `d`.
+ * - An OKP import either refuses a mismatched pair or silently replaces `x`
+ *   with the value derived from `d`, so it never reports the inconsistency to
+ *   the caller; a supplied `x` is compared here instead.
  *
- * These checks keep provider assumptions executable, so an upgrade that changes
- * one fails closed instead of silently altering which keys this library accepts.
+ * Which of these the provider also enforces itself varies across Node releases,
+ * so none of them is assumed: every check runs here regardless. That keeps
+ * provider assumptions executable, so an upgrade that changes one fails closed
+ * instead of silently altering which keys this library accepts.
  */
 
 import { createECDH, createPrivateKey, createPublicKey, createSecretKey, type KeyObject } from 'node:crypto';
