@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createCipheriv, createHmac, randomBytes } from 'node:crypto';
 
 import { CBC_IV_BYTES, cbcHmacParameters } from '../../../src/algorithms/content-encryption/aes-cbc-hmac.ts';
 import { GCM_IV_BYTES, GCM_TAG_BYTES } from '../../../src/algorithms/content-encryption/aes-gcm.ts';
@@ -328,25 +328,32 @@ describe('CBC-HMAC construction detail', () => {
   });
 
   test('does not leak padding validity separately from authentication', async () => {
-    // With the tag recomputed over the corrupted ciphertext the MAC passes, so
-    // decryption reaches genuinely invalid padding. That must still surface as
-    // the same authentication outcome as a bad tag.
+    // With the tag computed over this ciphertext the MAC passes, so decryption
+    // reaches genuinely invalid padding. That must still surface as the same
+    // authentication outcome as a bad tag.
     const algorithm = 'A128CBC-HS256';
     const parameters = cbcHmacParameters(algorithm)!;
-    const { cek, iv, ciphertext } = await seal(algorithm);
+    const { cek, iv } = materials(algorithm);
 
-    const corrupted = flipBit(ciphertext, ciphertext.length - 1, 0xff);
+    // Encrypting an all-zero block unpadded makes the invalid padding certain:
+    // the final plaintext byte is 0x00, which is never a valid PKCS#7 length.
+    // Corrupting a valid ciphertext instead would leave that byte unpredictable
+    // and pass for the wrong reason whenever it happened to be a valid length.
+    const unpadded = new Uint8Array(16);
+    const cipher = createCipheriv(parameters.cipher, cek.subarray(16), iv);
+    cipher.setAutoPadding(false);
+    const ciphertext = new Uint8Array(Buffer.concat([cipher.update(unpadded), cipher.final()]));
 
     const lengthBlock = new Uint8Array(8);
     new DataView(lengthBlock.buffer).setBigUint64(0, BigInt(AAD.length) * 8n);
     const mac = createHmac(parameters.hash, cek.subarray(0, 16));
     mac.update(AAD);
     mac.update(iv);
-    mac.update(corrupted);
+    mac.update(ciphertext);
     mac.update(lengthBlock);
-    const forgedTag = new Uint8Array(mac.digest().subarray(0, parameters.tagBytes));
+    const tag = new Uint8Array(mac.digest().subarray(0, parameters.tagBytes));
 
-    const opened = await openContent(algorithm, cek, iv, corrupted, forgedTag, AAD);
+    const opened = await openContent(algorithm, cek, iv, ciphertext, tag, AAD);
     assert.strictEqual(opened.ok, true);
     if (opened.ok) {
       assert.strictEqual(opened.value, undefined);
