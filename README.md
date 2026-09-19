@@ -16,38 +16,73 @@ Requires Node.js `>=20.10.0`. The package uses ESM and includes TypeScript decla
 
 ### Usage
 
-Sign a message with an ES256 private key, then verify it with the corresponding public key:
+The examples below are abbreviated to show the shape of each API. See the
+[JOSE Suite documentation](https://docs.josesuite.com) for complete, runnable examples.
+
+#### Sign and verify a message
+
+Every operation takes an explicit algorithm policy. A token cannot talk the verifier into
+accepting an algorithm the policy does not list, which is what closes the algorithm confusion
+class of attack.
 
 ```ts
-import { AlgorithmPolicy, generateKeyPair, LIMITS_V1, signCompact, verifyCompact } from '@josesuite/node';
-
-const generated = await generateKeyPair({ algorithm: 'ES256' });
-if (!generated.ok) throw new Error(generated.reason);
-const { privateKey, publicKey } = generated.keys;
-
-const payload = new TextEncoder().encode('Order 123 is ready to ship');
+// Issuer: sign with the private key
 const signed = await signCompact(payload, {
   key: privateKey,
   policy: AlgorithmPolicy.create('jws', ['ES256'], 'create'),
   limits: LIMITS_V1,
 });
-if (!signed.ok) throw new Error(signed.reason);
 
+// Recipient: verify with the public key, under its own policy
 const verified = await verifyCompact(signed.token, {
   key: publicKey,
   policy: AlgorithmPolicy.create('jws', ['ES256'], 'receive'),
   principalId: 'order-service',
   limits: LIMITS_V1,
 });
-if (!verified.ok) throw new Error(verified.reason);
-
-console.log(new TextDecoder().decode(verified.payload));
-// Order 123 is ready to ship
 ```
 
-The signing and verification policies explicitly allow `ES256`; the token cannot enable another algorithm. For JWTs that require issuer, audience, type, and time validation, use `validateJwt`.
+#### Issue and validate a JWT against a profile
 
-See the [JOSE Suite documentation](https://docs.josesuite.com) for further usage.
+A profile fixes the issuer, audience, token type, and lifetime once. Validation checks the
+whole set on every token, so individual call sites cannot forget one.
+
+```ts
+// Define once at startup, reuse for every token
+const profile = createJwtProfile({
+  name: 'project-jwt-v1',
+  issuer: 'https://issuer.example',
+  audience: 'https://api.example',
+  type: 'JWT',
+  chain: 'JWS -> claims',
+  clock,
+  verification,
+  subject: (issuer, subject) => subject.startsWith('user:'),
+});
+
+const token = await createJwt({ profile, limits: LIMITS_V1, claims, signing });
+const result = await validateJwt(token.token, { profile, limits: LIMITS_V1 });
+```
+
+#### Encrypt for multiple recipients
+
+One ciphertext, one content encryption key, wrapped separately per recipient. Each recipient
+decrypts with only their own private key.
+
+```ts
+// Both recipients are addressed in a single encrypt call
+const encrypted = await encryptJson(plaintext, {
+  recipients: [{ key: billingPublicKey }, { key: auditPublicKey }],
+  contentAlgorithm: 'A128CBC-HS256',
+  keyPolicy: AlgorithmPolicy.create('jwe_alg', ['RSA-OAEP-256'], 'create'),
+  contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128CBC-HS256'], 'create'),
+  limits: LIMITS_V1,
+  random,
+});
+```
+
+Every operation returns a result object rather than throwing: check `.ok` before reading
+`.token`, `.payload`, or `.value`.
 
 ## Features
 
@@ -60,44 +95,6 @@ See the [JOSE Suite documentation](https://docs.josesuite.com) for further usage
 - Require named signers or a threshold of distinct signers when verifying General JWS messages.
 
 The package has zero runtime dependencies and uses Node.js cryptographic APIs. Algorithm selection is explicit; registered algorithms are not automatically enabled.
-
-## Encryption
-
-Encrypt a message for a recipient using RSA-OAEP-256 and authenticated AES-CBC encryption, then decrypt it with the recipient's private key:
-
-```ts
-import { randomBytes } from 'node:crypto';
-import { AlgorithmPolicy, decryptCompact, encryptCompact, generateKeyPair, LIMITS_V1 } from '@josesuite/node';
-
-const generated = await generateKeyPair({
-  algorithm: 'RSA-OAEP-256',
-  contentAlgorithms: ['A128CBC-HS256'],
-});
-if (!generated.ok) throw new Error(generated.reason);
-const { privateKey, publicKey } = generated.keys;
-
-const encrypted = await encryptCompact(new TextEncoder().encode('Your delivery code is 4821'), {
-  recipients: [{ key: publicKey }],
-  contentAlgorithm: 'A128CBC-HS256',
-  keyPolicy: AlgorithmPolicy.create('jwe_alg', ['RSA-OAEP-256'], 'create'),
-  contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128CBC-HS256'], 'create'),
-  limits: LIMITS_V1,
-  random: { randomBytes: (length) => ({ ok: true, value: randomBytes(length) }) },
-});
-if (!encrypted.ok) throw new Error(encrypted.reason);
-
-const decrypted = await decryptCompact(encrypted.token, {
-  recipients: [{ principalId: 'delivery-service', key: privateKey }],
-  principalId: 'delivery-service',
-  keyPolicy: AlgorithmPolicy.create('jwe_alg', ['RSA-OAEP-256'], 'receive'),
-  contentPolicy: AlgorithmPolicy.create('jwe_enc', ['A128CBC-HS256'], 'receive'),
-  limits: LIMITS_V1,
-});
-if (!decrypted.ok) throw new Error(decrypted.reason);
-
-console.log(new TextDecoder().decode(decrypted.plaintext));
-// Your delivery code is 4821
-```
 
 ## Standards
 
