@@ -160,6 +160,7 @@ describe('provider capabilities this library relies on', () => {
     const derived = deriveEcPublicPoint('P-256', new Uint8Array(Buffer.from(a['d']!, 'base64url')));
     assert.strictEqual(derived.ok, true);
     if (derived.ok) {
+      assert.strictEqual(b64u(derived.value.x), a['x']!);
       assert.notStrictEqual(b64u(derived.value.x), b['x']!);
     }
   });
