@@ -1,7 +1,40 @@
 {
   "name": "@josesuite/node",
   "version": "1.0.0",
-  "description": "Secure, standards-compliant JOSE library for Node.js covering JWS, JWE, JWT, JWK, JWKS, and JWA.",
+  "description": "Security-focused, standards-compliant JOSE for Node.js with JWS, JWE, JWT, JWK/JWKS, JWA, strict validation, and explicit algorithm policies.",
+  "keywords": [
+    "aes-gcm",
+    "authentication",
+    "cryptography",
+    "ecdh-es",
+    "ecdsa",
+    "ed25519",
+    "hmac",
+    "jose",
+    "json-web-algorithms",
+    "json-web-encryption",
+    "json-web-key",
+    "json-web-signature",
+    "json-web-token",
+    "jwa",
+    "jwe",
+    "jwk",
+    "jwks",
+    "jws",
+    "jwt",
+    "nodejs",
+    "oauth2",
+    "openid-connect",
+    "rfc7515",
+    "rfc7516",
+    "rfc7517",
+    "rfc7518",
+    "rfc7519",
+    "rsa",
+    "security",
+    "typescript",
+    "webcrypto"
+  ],
   "homepage": "https://docs.josesuite.com",
   "bugs": {
     "url": "https://github.com/josesuite/node/issues"
@@ -10,13 +43,15 @@
   "author": {
     "name": "Madan Sapkota",
     "email": "developermadan+jose@gmail.com",
-    "url": "https://madansapkota.com",
-    "role": "Maintainer"
+    "url": "https://madansapkota.com"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/josesuite/node.git"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -25,8 +60,11 @@
       "import": "./dist/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.test.json",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "oxfmt --check",
@@ -37,7 +75,7 @@
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-reporter=lcov --test-reporter-destination=lcov.info"
   },
   "devDependencies": {
-    "@types/node": "^26.6.1",
+    "@types/node": "^26.6.2",
     "oxfmt": "^0.68.0",
     "oxlint": "^1.83.0",
     "typescript": "^7.0.2"
