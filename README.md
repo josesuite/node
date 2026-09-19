@@ -87,18 +87,24 @@ Every operation returns a result object rather than throwing: check `.ok` before
 
 ## Features
 
-- Sign and verify JWS messages, including detached payloads and opt-in unencoded payloads.
-- Encrypt and decrypt JWE payloads, including messages addressed to multiple recipients.
-- Use Compact, Flattened JSON, and General JSON serializations for JWS and JWE.
-- Create and validate signed JWTs and nested signed-and-encrypted JWTs with application profiles
-  for issuer, audience, token type, and time checks.
-- Generate asymmetric key pairs and symmetric secrets, validate imported JWKs, and export public
-  keys.
-- Work with JWKS snapshots and calculate SHA-256 JWK thumbprints and thumbprint URIs.
-- Require named signers or a threshold of distinct signers when verifying General JWS messages.
-
-The package has zero runtime dependencies and uses Node.js cryptographic APIs. Algorithm selection
-is explicit; registered algorithms are not automatically enabled.
+- **Full JOSE surface.** JWS signing and verification, JWE encryption and decryption, JWT creation
+  and validation, and JWK/JWKS key management, in Compact, Flattened JSON, and General JSON
+  serializations.
+- **Profile-driven JWT validation.** Pin issuer, audience, token type, and lifetime once in a
+  profile, then validate every token against the complete set rather than per call site.
+- **Explicit algorithm policy.** Every operation declares the algorithms it accepts. Registered
+  algorithms are never enabled implicitly, so a token cannot negotiate its way into a weaker
+  algorithm than the one you configured.
+- **Zero runtime dependencies.** Cryptography runs on Node.js native APIs. Nothing is pulled into
+  your supply chain to sign a token.
+- **Key lifecycle included.** Generate key pairs and secrets, validate imported JWKs, export public
+  keys, build JWKS snapshots, and derive SHA-256 thumbprints and thumbprint URIs.
+- **Errors as values.** Operations return a result object instead of throwing. Failures carry a
+  category, a trust stage, and a reason, which makes the failure path as typed as the success path.
+- **Multi-party messages.** Address one ciphertext to many recipients, and require named signers or
+  a threshold of distinct signers when verifying General JWS.
+- **Consistent across implementations.** The same policies and validation behavior apply across
+  every JOSE Suite language implementation.
 
 ## Standards
 
