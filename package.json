@@ -1,7 +1,40 @@
 {
   "name": "@josesuite/node",
-  "version": "1.0.0",
-  "description": "Secure, standards-compliant JOSE library for Node.js covering JWS, JWE, JWT, JWK, JWKS, and JWA.",
+  "version": "1.0.1",
+  "description": "Security-focused, standards-compliant JOSE for Node.js with JWS, JWE, JWT, JWK/JWKS, JWA, strict validation, and explicit algorithm policies.",
+  "keywords": [
+    "aes-gcm",
+    "authentication",
+    "cryptography",
+    "ecdh-es",
+    "ecdsa",
+    "ed25519",
+    "hmac",
+    "jose",
+    "json-web-algorithms",
+    "json-web-encryption",
+    "json-web-key",
+    "json-web-signature",
+    "json-web-token",
+    "jwa",
+    "jwe",
+    "jwk",
+    "jwks",
+    "jws",
+    "jwt",
+    "nodejs",
+    "oauth2",
+    "openid-connect",
+    "rfc7515",
+    "rfc7516",
+    "rfc7517",
+    "rfc7518",
+    "rfc7519",
+    "rsa",
+    "security",
+    "typescript",
+    "webcrypto"
+  ],
   "homepage": "https://docs.josesuite.com",
   "bugs": {
     "url": "https://github.com/josesuite/node/issues"
@@ -10,8 +43,7 @@
   "author": {
     "name": "Madan Sapkota",
     "email": "developermadan+jose@gmail.com",
-    "url": "https://madansapkota.com",
-    "role": "Maintainer"
+    "url": "https://madansapkota.com"
   },
   "repository": {
     "type": "git",
@@ -19,30 +51,25 @@
   },
   "type": "module",
   "sideEffects": false,
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.test.json",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "oxfmt --check",
     "format:fix": "oxfmt",
-    "build": "tsc",
+    "build": "tsc && bun scripts/post-build.ts",
     "test": "node --test",
     "test_legacy": "bunx tsx --test $(find tests -type f -name '*.test.ts')",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-reporter=lcov --test-reporter-destination=lcov.info"
   },
   "devDependencies": {
-    "@types/node": "^26.6.1",
+    "@types/bun": "^1.4.2",
+    "@types/node": "^26.6.2",
     "oxfmt": "^0.68.0",
     "oxlint": "^1.83.0",
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=20.10.0"
+    "node": ">=20.10"
   }
 }

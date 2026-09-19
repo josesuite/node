@@ -1,0 +1,111 @@
+# The workflow to install the package
+name: Install
+
+# Controls when the workflow will run
+on:
+  workflow_run:
+    workflows: [Publish]
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  npm-install:
+    name: Install with npm
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [20, 21, 22, 23, 24, 25, 26]
+      fail-fast: false
+
+    steps:
+      - name: Set up Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Generate package.json file
+        run: npm init -y
+
+      - name: Install Jose Suite latest package with npm
+        run: npm install @josesuite/node
+
+      - name: List installed packages
+        run: npm list --depth=0
+
+  yarn-install:
+    name: Install with Yarn
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node-version: [20, 21, 22, 23, 24, 25, 26]
+      fail-fast: false
+
+    steps:
+      - name: Set up Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Generate package.json file
+        run: npm init -y
+
+      - name: Install Jose Suite latest package with Yarn
+        run: yarn add @josesuite/node
+
+      - name: List installed packages
+        run: yarn list --depth=0
+
+  pnpm-install:
+    name: Install with pnpm
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: [20, 21, 22, 23, 24, 25, 26]
+      fail-fast: false
+
+    steps:
+      - name: Set up Node.js runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Set up pnpm package manager
+        run: npm install -g pnpm
+
+      - name: Generate package.json file
+        run: pnpm init
+
+      - name: Install Jose Suite latest package with pnpm
+        run: pnpm add @josesuite/node
+
+      - name: List installed packages
+        run: pnpm list --depth=0
+
+  bun-install:
+    name: Install with Bun
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+      fail-fast: false
+
+    steps:
+      - name: Set up Bun runtime
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - name: Generate package.json file
+        run: bun init -y
+
+      - name: Install Jose Suite latest package with Bun
+        run: bun add @josesuite/node
+
+      - name: List installed packages
+        run: bun pm ls
