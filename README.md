@@ -1,12 +1,13 @@
 # JOSE Suite for Node.js
 
-`@josesuite/node` is a JOSE library for Node.js and TypeScript, providing JWT creation and validation, JWS signing and verification, JWE encryption and decryption, and JWK/JWKS key management.
+`@josesuite/node` is a JOSE library for Node.js and TypeScript, providing JWT creation and
+validation, JWS signing and verification, JWE encryption and decryption, and JWK/JWKS key
+management.
 
-It is built for applications that need explicit control over trusted algorithms, keys, and token validation, with consistent JOSE behavior across JOSE Suite implementations.
+It is built for applications that need explicit control over trusted algorithms, keys, and token
+validation, with consistent JOSE behavior across JOSE Suite implementations.
 
 ## Getting started
-
-### Installation
 
 ```bash
 npm install @josesuite/node
@@ -14,12 +15,12 @@ npm install @josesuite/node
 
 Requires Node.js `>=20.10.0`. The package uses ESM and includes TypeScript declarations.
 
-### Usage
+## Usage
 
 The examples below are abbreviated to show the shape of each API. See the
 [JOSE Suite documentation](https://docs.josesuite.com) for complete, runnable examples.
 
-#### Sign and verify a message
+### Sign and verify a message
 
 Every operation takes an explicit algorithm policy. A token cannot talk the verifier into
 accepting an algorithm the policy does not list, which is what closes the algorithm confusion
@@ -42,7 +43,7 @@ const verified = await verifyCompact(signed.token, {
 });
 ```
 
-#### Issue and validate a JWT against a profile
+### Issue and validate a JWT against a profile
 
 A profile fixes the issuer, audience, token type, and lifetime once. Validation checks the
 whole set on every token, so individual call sites cannot forget one.
@@ -64,7 +65,7 @@ const token = await createJwt({ profile, limits: LIMITS_V1, claims, signing });
 const result = await validateJwt(token.token, { profile, limits: LIMITS_V1 });
 ```
 
-#### Encrypt for multiple recipients
+### Encrypt for multiple recipients
 
 One ciphertext, one content encryption key, wrapped separately per recipient. Each recipient
 decrypts with only their own private key.
@@ -89,16 +90,20 @@ Every operation returns a result object rather than throwing: check `.ok` before
 - Sign and verify JWS messages, including detached payloads and opt-in unencoded payloads.
 - Encrypt and decrypt JWE payloads, including messages addressed to multiple recipients.
 - Use Compact, Flattened JSON, and General JSON serializations for JWS and JWE.
-- Create and validate signed JWTs and nested signed-and-encrypted JWTs with application profiles for issuer, audience, token type, and time checks.
-- Generate asymmetric key pairs and symmetric secrets, validate imported JWKs, and export public keys.
+- Create and validate signed JWTs and nested signed-and-encrypted JWTs with application profiles
+  for issuer, audience, token type, and time checks.
+- Generate asymmetric key pairs and symmetric secrets, validate imported JWKs, and export public
+  keys.
 - Work with JWKS snapshots and calculate SHA-256 JWK thumbprints and thumbprint URIs.
 - Require named signers or a threshold of distinct signers when verifying General JWS messages.
 
-The package has zero runtime dependencies and uses Node.js cryptographic APIs. Algorithm selection is explicit; registered algorithms are not automatically enabled.
+The package has zero runtime dependencies and uses Node.js cryptographic APIs. Algorithm selection
+is explicit; registered algorithms are not automatically enabled.
 
 ## Standards
 
-The package implements JOSE operations based on these standards, subject to JOSE Suite's algorithm and validation policies:
+The package implements JOSE operations based on these standards, subject to JOSE Suite's algorithm
+and validation policies:
 
 | Standard                                                | Purpose                      | Use case                                                                            |
 | ------------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------- |
@@ -118,7 +123,8 @@ See [SECURITY](SECURITY.md) for supported versions and how to report vulnerabili
 
 ## Contributing
 
-See [CONTRIBUTING](CONTRIBUTING.md) for setup instructions, required checks, and how to submit a pull request.
+See [CONTRIBUTING](CONTRIBUTING.md) for setup instructions, required checks, and how to submit a
+pull request.
 
 ## Code of conduct
 
