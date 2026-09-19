@@ -49,38 +49,27 @@
     "type": "git",
     "url": "git+https://github.com/josesuite/node.git"
   },
-  "files": [
-    "dist"
-  ],
   "type": "module",
   "sideEffects": false,
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.test.json",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "oxfmt --check",
     "format:fix": "oxfmt",
-    "build": "tsc",
+    "build": "tsc && bun scripts/post-build.ts",
     "test": "node --test",
     "test_legacy": "bunx tsx --test $(find tests -type f -name '*.test.ts')",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-reporter=lcov --test-reporter-destination=lcov.info"
   },
   "devDependencies": {
+    "@types/bun": "^1.4.2",
     "@types/node": "^26.6.2",
     "oxfmt": "^0.68.0",
     "oxlint": "^1.83.0",
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=20.10.0"
+    "node": ">=20.10"
   }
 }
