@@ -8,6 +8,9 @@ on:
     types:
       - completed
 
+permissions:
+  contents: read
+
 jobs:
   npm-install:
     name: Install with npm
