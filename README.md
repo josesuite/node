@@ -103,29 +103,29 @@ console.log(new TextDecoder().decode(decrypted.plaintext));
 
 The package implements JOSE operations based on these standards, subject to JOSE Suite's algorithm and validation policies:
 
-| Standard                                           | Purpose                      |
-| -------------------------------------------------- | ---------------------------- |
-| [RFC 7515](https://www.rfc-editor.org/rfc/rfc7515) | JSON Web Signature           |
-| [RFC 7516](https://www.rfc-editor.org/rfc/rfc7516) | JSON Web Encryption          |
-| [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517) | JSON Web Key and JWK Sets    |
-| [RFC 7518](https://www.rfc-editor.org/rfc/rfc7518) | JSON Web Algorithms          |
-| [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519) | JSON Web Token               |
-| [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) | JWK Thumbprints              |
-| [RFC 7797](https://www.rfc-editor.org/rfc/rfc7797) | JWS Unencoded Payload Option |
-| [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725) | JWT Best Current Practices   |
-| [RFC 9278](https://www.rfc-editor.org/rfc/rfc9278) | JWK Thumbprint URI           |
+| Standard                                           | Purpose                      | Use case                                                                            |
+| -------------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------- |
+| [RFC 7515](https://www.rfc-editor.org/rfc/rfc7515) | JSON Web Signature           | Sign and verify payloads, compact or JSON with multiple signers                     |
+| [RFC 7516](https://www.rfc-editor.org/rfc/rfc7516) | JSON Web Encryption          | Encrypt payloads for one or many recipients                                         |
+| [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517) | JSON Web Key and JWK Sets    | Import, export, and publish keys; build JWKS snapshots                              |
+| [RFC 7518](https://www.rfc-editor.org/rfc/rfc7518) | JSON Web Algorithms          | Resolve which algorithms are permitted for a given operation                        |
+| [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519) | JSON Web Token               | Issue and validate claims-based tokens against a profile                            |
+| [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638) | JWK Thumbprints              | Derive a stable key identifier for key lookup and pinning                           |
+| [RFC 7797](https://www.rfc-editor.org/rfc/rfc7797) | JWS Unencoded Payload Option | Sign large or detached payloads without base64url-encoding them                     |
+| [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725) | JWT Best Current Practices   | Reject algorithm confusion, unbounded input, and other known JWT attacks by default |
+| [RFC 9278](https://www.rfc-editor.org/rfc/rfc9278) | JWK Thumbprint URI           | Reference a key by URI in claims and trust configuration                            |
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for supported versions and how to report vulnerabilities privately.
+See [SECURITY](SECURITY.md) for supported versions and how to report vulnerabilities privately.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, required checks, and how to submit a pull request.
+See [CONTRIBUTING](CONTRIBUTING.md) for setup instructions, required checks, and how to submit a pull request.
 
 ## Code of conduct
 
-See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations and how to report concerns.
+See [CODE OF CONDUCT](CODE_OF_CONDUCT.md) for community expectations and how to report concerns.
 
 ## License
 
