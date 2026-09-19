@@ -38,6 +38,23 @@ function b64u(bytes: Uint8Array | Buffer): string {
   return Buffer.from(bytes).toString('base64url');
 }
 
+/**
+ * The `x` a private JWK exports after a round trip, or `undefined` if the
+ * provider refuses the key.
+ *
+ * Providers that validate `x` against `d` at import reject keys that others
+ * admit, so folding a rejection into `undefined` lets a qualification test
+ * assert what an accepted key reports without fixing which runtimes accept it.
+ */
+function publicJwkAfterRoundTrip(jwk: Record<string, string>): string | undefined {
+  try {
+    const imported = createPrivateKey({ key: jwk, format: 'jwk' });
+    return createPublicKey(imported).export({ format: 'jwk' }).x;
+  } catch {
+    return undefined;
+  }
+}
+
 describe('provider gaps this library compensates for', () => {
   test('accepts an RSA private JWK whose CRT parameters are inconsistent', () => {
     const jwk = generateKeyPairSync('rsa', { modulusLength: 3072 }).privateKey.export({
@@ -52,7 +69,7 @@ describe('provider gaps this library compensates for', () => {
     assert.doesNotThrow(() => createPrivateKey({ key: { ...jwk, qi: b64u(qi) }, format: 'jwk' }));
   });
 
-  test('echoes supplied EC coordinates instead of deriving them from d', () => {
+  test('never repairs mismatched EC coordinates on a JWK round trip', () => {
     const a = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({
       format: 'jwk',
     }) as Record<string, string>;
@@ -60,23 +77,37 @@ describe('provider gaps this library compensates for', () => {
       format: 'jwk',
     }) as Record<string, string>;
 
-    const mixed = createPrivateKey({
-      key: { kty: 'EC', crv: 'P-256', x: b['x']!, y: b['y']!, d: a['d']! },
-      format: 'jwk',
+    // Providers differ on whether such a key imports at all: some reject it,
+    // others echo the supplied coordinates back. Neither derives the point that
+    // `d` actually belongs to, so a round trip is never evidence of
+    // consistency and scalar multiplication is used instead.
+    const roundTripped = publicJwkAfterRoundTrip({
+      kty: 'EC',
+      crv: 'P-256',
+      x: b['x']!,
+      y: b['y']!,
+      d: a['d']!,
     });
-    const exported = createPublicKey(mixed).export({ format: 'jwk' });
 
-    // The export returns the foreign coordinates, so a round trip proves
-    // nothing about consistency; scalar multiplication is used instead.
-    assert.strictEqual(exported.x, b['x']!);
-    assert.notStrictEqual(exported.x, a['x']!);
+    if (roundTripped !== undefined) {
+      assert.notStrictEqual(roundTripped, a['x']!);
+    }
   });
 
-  test('accepts an X25519 private JWK whose public component does not match d', () => {
+  test('either rejects or silently corrects a mismatched X25519 public component', () => {
     const a = generateKeyPairSync('x25519').privateKey.export({ format: 'jwk' }) as Record<string, string>;
     const b = generateKeyPairSync('x25519').privateKey.export({ format: 'jwk' }) as Record<string, string>;
 
-    assert.doesNotThrow(() => createPrivateKey({ key: { ...a, x: b['x']! }, format: 'jwk' }));
+    // Correcting the key rather than reporting it is still a gap: a caller
+    // trusting the round trip never learns the JWK it was handed was
+    // inconsistent, which is why the mismatch is checked before the provider
+    // sees the key.
+    const roundTripped = publicJwkAfterRoundTrip({ ...a, x: b['x']! });
+
+    if (roundTripped !== undefined) {
+      assert.strictEqual(roundTripped, a['x']!);
+      assert.notStrictEqual(roundTripped, b['x']!);
+    }
   });
 });
 
