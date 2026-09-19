@@ -12,7 +12,7 @@ It is built for applications that need explicit control over trusted algorithms,
 npm install @josesuite/node
 ```
 
-Requires Node.js `>=20.20.0 <21 || ^22.11.0 || ^24.11.0 || ^26.0.0`. The package uses ESM and includes TypeScript declarations.
+Requires Node.js `>=20.10.0`. The package uses ESM and includes TypeScript declarations.
 
 ### Usage
 

@@ -15,10 +15,7 @@ include sensitive reports in issues, discussions, or pull requests.
 
 | Tool    | Supported version | Purpose                 |
 | ------- | ----------------- | ----------------------- |
-| Node.js | `>=20.20 <21`     | Runtime and test runner |
-| Node.js | `>=22.11 <23`     | Runtime and test runner |
-| Node.js | `>=24.11 <25`     | Runtime and test runner |
-| Node.js | `>=26`            | Runtime and test runner |
+| Node.js | `>=20.10.0`       | Runtime and test runner |
 | Bun     | `1.4.x`           | Packages and scripts    |
 
 Install dependencies from the lockfile:
