@@ -108,6 +108,71 @@ export function deriveEcPublicPoint(curve: string, privateScalar: Uint8Array): B
   }
 }
 
+/**
+ * PKCS8 prefixes for an OKP private key, one per curve, up to the raw scalar.
+ *
+ * The encoded lengths fix each curve's private-key width, so appending a scalar
+ * of that width completes the structure with no length arithmetic. A scalar
+ * wider than the curve's width still parses, with the excess ignored, so
+ * callers are responsible for checking the width before derivation.
+ */
+const OKP_PKCS8_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  Ed25519: '302e020100300506032b657004220420',
+  Ed448: '3047020100300506032b6571043b0439',
+  X25519: '302e020100300506032b656e04220420',
+  X448: '3046020100300506032b656f043a0438',
+});
+
+/** X25519 scalar and its public value, from RFC 7748 section 6.1. */
+const X25519_PROBE_SCALAR = '77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a';
+const X25519_PROBE_PUBLIC = '8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a';
+
+function derivesFromJwkPlaceholder(): boolean {
+  const scalar = Buffer.from(X25519_PROBE_SCALAR, 'hex');
+  const derived = okpPublicFromJwk('X25519', scalar);
+  return derived !== undefined && Buffer.from(derived).toString('hex') === X25519_PROBE_PUBLIC;
+}
+
+/**
+ * Whether the JWK encoding can be used for derivation on this runtime.
+ *
+ * Deriving through a JWK is several times cheaper than through PKCS8, but only
+ * sound where the provider replaces the placeholder `x` below. Runtimes that
+ * validate `x` against `d` at import reject that key instead, so the encoding
+ * is chosen by deriving a known answer once rather than by runtime version.
+ */
+const DERIVES_FROM_JWK_PLACEHOLDER = derivesFromJwkPlaceholder();
+
+function okpPublicFromJwk(curve: string, privateKey: Uint8Array): Uint8Array | undefined {
+  try {
+    const key = createPrivateKey({
+      key: {
+        kty: 'OKP',
+        crv: curve,
+        // A private OKP JWK requires `x`. This placeholder is never read as a
+        // public component: the provider overwrites it with the value derived
+        // from `d`, which `DERIVES_FROM_JWK_PLACEHOLDER` establishes.
+        x: Buffer.alloc(privateKey.length).toString('base64url'),
+        d: Buffer.from(privateKey).toString('base64url'),
+      },
+      format: 'jwk',
+    });
+
+    return okpPublicOf(key);
+  } catch {
+    return undefined;
+  }
+}
+
+function okpPublicFromPkcs8(header: string, privateKey: Uint8Array): Uint8Array | undefined {
+  try {
+    const encoded = Buffer.concat([Buffer.from(header, 'hex'), Buffer.from(privateKey)]);
+    return okpPublicOf(createPrivateKey({ key: encoded, format: 'der', type: 'pkcs8' }));
+  } catch {
+    return undefined;
+  }
+}
+
 function okpPublicOf(key: KeyObject): Uint8Array | undefined {
   const exported = createPublicKey(key).export({ format: 'jwk' });
   return typeof exported.x === 'string' ? new Uint8Array(Buffer.from(exported.x, 'base64url')) : undefined;
@@ -116,28 +181,21 @@ function okpPublicOf(key: KeyObject): Uint8Array | undefined {
 /**
  * Computes the public key octets for an OKP private key.
  *
- * Unlike the EC case, exporting an imported OKP private key returns the key
- * actually derived from `d`, so the provider's own derivation is used.
+ * As for EC, the result is computed from the private scalar alone and never
+ * from a supplied public component, which is what lets the caller compare the
+ * two to detect a mismatched key.
  */
 export function deriveOkpPublicKey(curve: string, privateKey: Uint8Array): BackendResult<Uint8Array> {
-  try {
-    const key = createPrivateKey({
-      key: {
-        kty: 'OKP',
-        crv: curve,
-        // A private OKP JWK requires `x`, but the provider recomputes it from
-        // `d`; a placeholder of the right length is replaced by the derivation.
-        x: Buffer.alloc(privateKey.length).toString('base64url'),
-        d: Buffer.from(privateKey).toString('base64url'),
-      },
-      format: 'jwk',
-    });
-
-    const derived = okpPublicOf(key);
-    return derived === undefined ? backendError('operation_failed') : backendOk(derived);
-  } catch {
-    return backendError('operation_failed');
+  const header = OKP_PKCS8_HEADERS[curve];
+  if (header === undefined) {
+    return backendError('unsupported');
   }
+
+  const derived = DERIVES_FROM_JWK_PLACEHOLDER
+    ? okpPublicFromJwk(curve, privateKey)
+    : okpPublicFromPkcs8(header, privateKey);
+
+  return derived === undefined ? backendError('operation_failed') : backendOk(derived);
 }
 
 /**
