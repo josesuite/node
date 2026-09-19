@@ -1,6 +1,6 @@
 {
   "name": "@josesuite/node",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Security-focused, standards-compliant JOSE for Node.js with JWS, JWE, JWT, JWK/JWKS, JWA, strict validation, and explicit algorithm policies.",
   "keywords": [
     "aes-gcm",
