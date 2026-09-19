@@ -1,5 +1,14 @@
 # JOSE Suite for Node.js
 
+![Node.js Version](https://img.shields.io/node/v/@josesuite/node?style=flat&logo=nodedotjs&label=node)
+![npm](https://img.shields.io/npm/v/@josesuite/node?style=flat&logo=npm&label=npm)
+![Tests](https://img.shields.io/github/actions/workflow/status/josesuite/node/test.yml?style=flat&logo=githubactions&label=test)
+![Build](https://img.shields.io/github/actions/workflow/status/josesuite/node/publish.yml?style=flat&logo=github&label=build)
+![Sonar Quality](https://img.shields.io/sonar/quality_gate/josesuite-node/main?server=https%3A%2F%2Fsonarcloud.io&style=flat&logo=sonarqubecloud&logoColor=126ED3&label=quality)
+![Sonar Coverage](https://img.shields.io/sonar/coverage/josesuite-node/main?server=https%3A%2F%2Fsonarcloud.io&style=flat&logo=sonarqubecloud&logoColor=126ED3&label=coverage)
+![Downloads](https://img.shields.io/npm/dt/@josesuite/node?style=flat&logo=npm&label=downloads)
+![License](https://img.shields.io/github/license/josesuite/node?style=flat&label=license&logo=opensourceinitiative&logoColor=fff)
+
 `@josesuite/node` is a JOSE library for Node.js and TypeScript, providing JWT creation and
 validation, JWS signing and verification, JWE encryption and decryption, and JWK/JWKS key
 management.
