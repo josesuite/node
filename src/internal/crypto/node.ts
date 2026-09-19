@@ -108,6 +108,11 @@ export function deriveEcPublicPoint(curve: string, privateScalar: Uint8Array): B
   }
 }
 
+function okpPublicOf(key: KeyObject): Uint8Array | undefined {
+  const exported = createPublicKey(key).export({ format: 'jwk' });
+  return typeof exported.x === 'string' ? new Uint8Array(Buffer.from(exported.x, 'base64url')) : undefined;
+}
+
 /**
  * Computes the public key octets for an OKP private key.
  *
@@ -128,12 +133,8 @@ export function deriveOkpPublicKey(curve: string, privateKey: Uint8Array): Backe
       format: 'jwk',
     });
 
-    const exported = createPublicKey(key).export({ format: 'jwk' });
-    if (typeof exported.x !== 'string') {
-      return backendError('operation_failed');
-    }
-
-    return backendOk(new Uint8Array(Buffer.from(exported.x, 'base64url')));
+    const derived = okpPublicOf(key);
+    return derived === undefined ? backendError('operation_failed') : backendOk(derived);
   } catch {
     return backendError('operation_failed');
   }
