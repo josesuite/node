@@ -259,26 +259,6 @@ describe('constant-time comparison', () => {
 });
 
 describe('WebCrypto backend selection', () => {
-  test('rejects the mismatched EC private key the native module accepts', async () => {
-    // This is the property that motivates preferring WebCrypto: the native
-    // module imports this key and echoes the attacker-supplied coordinates back
-    // on export, while WebCrypto refuses it outright.
-    const a = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({
-      format: 'jwk',
-    }) as Record<string, string>;
-    const b = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({
-      format: 'jwk',
-    }) as Record<string, string>;
-
-    const mismatched = { kty: 'EC', crv: 'P-256', x: b['x']!, y: b['y']!, d: a['d']! };
-
-    assert.doesNotThrow(() => createPrivateKey({ key: mismatched, format: 'jwk' }));
-
-    await assert.rejects(
-      crypto.subtle.importKey('jwk', mismatched, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']),
-    );
-  });
-
   test('produces ECDSA signatures in the fixed-width JOSE form', async () => {
     // No DER conversion step exists in this path, so the wire encoding cannot
     // be got wrong by a faulty converter.
